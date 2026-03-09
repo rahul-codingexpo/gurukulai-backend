@@ -1,31 +1,47 @@
 import mongoose from "mongoose";
-import "./role.model.js"; // ✅ register Role schema
+
 const userSchema = new mongoose.Schema(
   {
-    name: String,
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
     email: {
       type: String,
-      unique: true,
       required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
     },
 
-    phone: String,
+    phone: {
+      type: String,
+      trim: true,
+    },
+
+    username: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
 
     password: {
       type: String,
-      required: true,
-      select: false,
     },
 
     roleId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Role",
+      required: true,
     },
 
     schoolId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "School",
+      default: null,
     },
 
     status: {
@@ -36,5 +52,10 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+/* Indexing for performance */
+
+userSchema.index({ email: 1 });
+userSchema.index({ schoolId: 1 });
 
 export default mongoose.model("User", userSchema);

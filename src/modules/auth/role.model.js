@@ -5,6 +5,7 @@ const roleSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
+      enum: ["SuperAdmin", "Admin", "Principal", "Teacher", "Accountant"],
       unique: true,
     },
 
@@ -18,5 +19,7 @@ const roleSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+roleSchema.index({ name: 1, schoolId: 1 }, { unique: true });
 
 export default mongoose.model("Role", roleSchema);

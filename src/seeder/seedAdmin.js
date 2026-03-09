@@ -2,23 +2,33 @@ import mongoose from "mongoose";
 import { connectDB } from "../config/db.js";
 
 import Role from "../modules/auth/role.model.js";
-import User from "../modules/auth/user.model.js";
+import User from "../modules/user/user.model.js";
 import { hashPassword } from "../utils/hash.js";
 
 const seedAdmin = async () => {
   await connectDB();
 
-  // Create Super Admin Role
-  let role = await Role.findOne({ name: "SuperAdmin" });
+  // Roles list
+  const roles = ["SuperAdmin", "Admin", "Principal", "Teacher", "Accountant"];
 
-  if (!role) {
-    role = await Role.create({
-      name: "SuperAdmin",
-      permissions: ["ALL"],
-    });
+  // Create roles if not exists
+  for (const roleName of roles) {
+    const existingRole = await Role.findOne({ name: roleName });
+
+    if (!existingRole) {
+      await Role.create({
+        name: roleName,
+        permissions: ["ALL"],
+      });
+
+      console.log(`✅ Role created: ${roleName}`);
+    }
   }
 
-  // Create Admin User
+  // Super Admin Role
+  const superAdminRole = await Role.findOne({ name: "SuperAdmin" });
+
+  // Create Super Admin User
   const existingUser = await User.findOne({
     email: "admin@gurukul.ai",
   });
@@ -30,13 +40,13 @@ const seedAdmin = async () => {
       name: "Super Admin",
       email: "admin@gurukul.ai",
       password,
-      roleId: role._id,
+      roleId: superAdminRole._id,
       status: "ACTIVE",
     });
 
     console.log("✅ Super Admin Created");
   } else {
-    console.log("⚠️ Admin already exists");
+    console.log("⚠️ Super Admin already exists");
   }
 
   mongoose.connection.close();

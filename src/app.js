@@ -2,26 +2,31 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
+
 import { errorHandler, notFound } from "./middleware/error.middleware.js";
 import routes from "./routes/index.js";
 
 const app = express();
 
-app.use(errorHandler);
+/* ---------- Core Middleware ---------- */
 app.use(
   cors({
-    origin: "*", // later replace with frontend domain
+    origin: "*",
     credentials: true,
   }),
 );
+
 app.use(express.json());
 app.use(cookieParser());
 app.use(morgan("dev"));
 
+/* ---------- Routes ---------- */
 app.use("/api", routes);
-// unknown route handler
+
+/* ---------- Unknown Route ---------- */
 app.use(notFound);
 
-// global error handler (LAST)
+/* ---------- Global Error Handler (LAST) ---------- */
 app.use(errorHandler);
+
 export default app;

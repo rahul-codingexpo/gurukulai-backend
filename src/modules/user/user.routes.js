@@ -1,22 +1,13 @@
-// import express from "express";
-// import { protect } from "../../middleware/auth.middleware.js";
-
-// const router = express.Router();
-
-// router.get("/profile", protect, (req, res) => {
-//   res.json({
-//     success: true,
-//     user: req.user,
-//   });
-// });
-
-// export default router;
-
 import express from "express";
+import { createAdmin } from "./user.controller.js";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
 
 const router = express.Router();
+
+/* SuperAdmin creates Admin */
+
+router.post("/create-admin", protect, authorize("SuperAdmin"), createAdmin);
 
 // Only SuperAdmin & Admin allowed
 router.get(
