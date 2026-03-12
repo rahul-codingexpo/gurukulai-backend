@@ -14,7 +14,7 @@ const router = express.Router();
 
 /* Admin create staff */
 
-router.post("/", protect, authorize("Admin"), createStaff);
+router.post("/", protect, authorize("Admin", "Principal"), createStaff);
 
 /* Get staff */
 
@@ -22,10 +22,10 @@ router.get("/", protect, authorize("Admin", "Principal"), getStaff);
 
 /* Update staff */
 
-router.put("/:id", protect, authorize("Admin"), updateStaff);
+router.put("/:id", protect, authorize("Admin", "Principal"), updateStaff);
 
 /* Delete staff */
 
-router.delete("/:id", protect, authorize("Admin"), deleteStaff);
+router.delete("/:id", protect, authorize("Admin", "Principal"), deleteStaff);
 
 export default router;

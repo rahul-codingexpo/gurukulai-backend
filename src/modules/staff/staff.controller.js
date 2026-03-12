@@ -8,6 +8,73 @@ import bcrypt from "bcryptjs";
  * Only Admin
  */
 
+// export const createStaff = async (req, res, next) => {
+//   try {
+//     const {
+//       name,
+//       email,
+//       phone,
+//       salary,
+//       designation,
+//       joiningDate,
+//       status,
+//       username,
+//       password,
+//       schoolId,
+//     } = req.body;
+
+//     let user = null;
+
+//     /* 1️⃣ If login required create user */
+
+//     if (username && password) {
+//       const role = await Role.findOne({
+//         name: designation,
+//       });
+
+//       if (!role) {
+//         return res.status(404).json({
+//           success: false,
+//           message: "Role not found",
+//         });
+//       }
+
+//       const hashedPassword = await bcrypt.hash(password, 10);
+
+//       user = await User.create({
+//         name,
+//         email,
+//         phone,
+//         username,
+//         password: hashedPassword,
+//         roleId: role._id,
+//         schoolId,
+//       });
+//     }
+
+//     /* 2️⃣ Create Staff */
+
+//     const staff = await Staff.create({
+//       name,
+//       email,
+//       phone,
+//       salary,
+//       designation,
+//       joiningDate,
+//       status,
+//       userId: user?._id,
+//       schoolId,
+//     });
+
+//     res.status(201).json({
+//       success: true,
+//       data: staff,
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
 export const createStaff = async (req, res, next) => {
   try {
     const {
@@ -20,17 +87,14 @@ export const createStaff = async (req, res, next) => {
       status,
       username,
       password,
-      schoolId,
     } = req.body;
+
+    const schoolId = req.user.schoolId; // ✅ JWT se
 
     let user = null;
 
-    /* 1️⃣ If login required create user */
-
     if (username && password) {
-      const role = await Role.findOne({
-        name: designation,
-      });
+      const role = await Role.findOne({ name: designation });
 
       if (!role) {
         return res.status(404).json({
@@ -51,8 +115,6 @@ export const createStaff = async (req, res, next) => {
         schoolId,
       });
     }
-
-    /* 2️⃣ Create Staff */
 
     const staff = await Staff.create({
       name,
@@ -79,9 +141,27 @@ export const createStaff = async (req, res, next) => {
  * Get Staff List
  */
 
+// export const getStaff = async (req, res, next) => {
+//   try {
+//     const { schoolId } = req.query;
+
+//     const staff = await Staff.find({ schoolId }).populate(
+//       "userId",
+//       "username email",
+//     );
+
+//     res.json({
+//       success: true,
+//       data: staff,
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
 export const getStaff = async (req, res, next) => {
   try {
-    const { schoolId } = req.query;
+    const schoolId = req.user.schoolId; // JWT se schoolId
 
     const staff = await Staff.find({ schoolId }).populate(
       "userId",

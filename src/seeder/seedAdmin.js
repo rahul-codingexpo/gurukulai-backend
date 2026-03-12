@@ -9,7 +9,17 @@ const seedAdmin = async () => {
   await connectDB();
 
   // Roles list
-  const roles = ["SuperAdmin", "Admin", "Principal", "Teacher", "Accountant"];
+  const roles = [
+    "SuperAdmin",
+    "Admin",
+    "Principal",
+    "Teacher",
+    "Accountant",
+    "Librarian",
+    "Staff",
+    "Student",
+    "Parent",
+  ];
 
   // Create roles if not exists
   for (const roleName of roles) {

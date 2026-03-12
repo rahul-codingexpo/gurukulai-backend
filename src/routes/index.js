@@ -9,12 +9,16 @@ import sectionRoutes from "../modules/academic/section.routes.js";
 import attendanceRoutes from "../modules/attendance/attendance.routes.js";
 import timetableRoutes from "../modules/timetable/timetable.routes.js";
 import staffRoutes from "../modules/staff/staff.routes.js";
+import studentRoutes from "../modules/student/student.routes.js";
+import eventRoutes from "../modules/events/event.routes.js";
 const router = express.Router();
 
 router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
 router.use("/schools", schoolRoutes);
 router.use("/staff", staffRoutes);
+router.use("/students", studentRoutes);
+router.use("/events", eventRoutes);
 router.use("/sessions", sessionRoutes);
 router.use("/subjects", subjectRoutes);
 router.use("/classes", classRoutes);
