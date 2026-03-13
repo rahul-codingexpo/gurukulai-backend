@@ -56,8 +56,9 @@ export const createSchool = async (req, res, next) => {
 // };
 export const getSchools = async (req, res, next) => {
   try {
-    const filter =
-      req.user.role === "SuperAdmin" ? {} : { _id: req.user.schoolId };
+    const isSuperAdmin = req.user?.roleId?.name === "SuperAdmin";
+
+    const filter = isSuperAdmin ? {} : { _id: req.user.schoolId };
 
     const schools = await School.find(filter);
 
