@@ -8,6 +8,7 @@ import classRoutes from "../modules/academic/class.routes.js";
 import sectionRoutes from "../modules/academic/section.routes.js";
 import attendanceRoutes from "../modules/attendance/attendance.routes.js";
 import timetableRoutes from "../modules/timetable/timetable.routes.js";
+import classTimetableRoutes from "../modules/classTimetable/classTimetable.routes.js";
 import staffRoutes from "../modules/staff/staff.routes.js";
 import studentRoutes from "../modules/student/student.routes.js";
 import eventRoutes from "../modules/events/event.routes.js";
@@ -24,6 +25,7 @@ router.use("/subjects", subjectRoutes);
 router.use("/classes", classRoutes);
 router.use("/sections", sectionRoutes);
 router.use("/timetable", timetableRoutes);
+router.use("/class-timetable", classTimetableRoutes);
 router.use("/attendance", attendanceRoutes);
 router.get("/health", (req, res) => {
   res.json({

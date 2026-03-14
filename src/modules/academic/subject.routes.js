@@ -3,6 +3,7 @@ import {
   createSubject,
   getSubjects,
   deleteSubject,
+  updateSubject,
 } from "./subject.controller.js";
 
 import { protect } from "../../middleware/auth.middleware.js";
@@ -11,16 +12,40 @@ import { injectSchool } from "../../middleware/injectSchool.middleware.js";
 
 const router = express.Router();
 
-router.post("/", protect, authorize("Admin"), injectSchool, createSubject);
+// Create subject - Admin & Principal
+router.post(
+  "/",
+  protect,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  createSubject,
+);
 
+// List subjects - Admin, Principal & Teacher
 router.get(
   "/",
   protect,
-  authorize("Admin", "Teacher"),
+  authorize("Admin", "Principal", "Teacher"),
   injectSchool,
   getSubjects,
 );
 
-router.delete("/:id", protect, authorize("Admin"), injectSchool, deleteSubject);
+// Update subject - Admin & Principal
+router.put(
+  "/:id",
+  protect,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  updateSubject,
+);
+
+// Delete subject - Admin & Principal
+router.delete(
+  "/:id",
+  protect,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  deleteSubject,
+);
 
 export default router;

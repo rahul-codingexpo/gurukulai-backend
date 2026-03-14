@@ -11,6 +11,11 @@ const subjectSchema = new mongoose.Schema(
       type: String, // e.g. MATH101
     },
 
+    type: {
+      type: String, // e.g. Theory / Practical / Elective
+      trim: true,
+    },
+
     classId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class",

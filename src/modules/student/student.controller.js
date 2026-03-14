@@ -131,11 +131,19 @@ const parseJSON = (data, defaultValue) => {
   return data;
 };
 
+const resolveSchoolId = (req) => {
+  const roleName = req.user?.roleId?.name;
+  if (roleName === "SuperAdmin") {
+    return req.query.schoolId || req.body.schoolId || req.params.schoolId || null;
+  }
+  return req.user.schoolId;
+};
+
 /* CREATE ADMISSION */
 
 export const createAdmission = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
 
     /* FILES */
 
@@ -339,7 +347,7 @@ export const createAdmission = async (req, res, next) => {
 
 export const getStudents = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
 
     const students = await Student.find({ schoolId });
 
@@ -356,7 +364,7 @@ export const getStudents = async (req, res, next) => {
 
 export const getStudentById = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
     const studentId = req.params.id;
 
     const student = await Student.findOne({ _id: studentId, schoolId });
@@ -381,7 +389,7 @@ export const getStudentById = async (req, res, next) => {
 
 export const updateStudent = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
     const studentId = req.params.id;
 
     const student = await Student.findOne({ _id: studentId, schoolId });
@@ -424,7 +432,7 @@ export const updateStudent = async (req, res, next) => {
 
 export const updateStudentStatus = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
     const studentId = req.params.id;
 
     const { status } = req.body;
@@ -457,7 +465,7 @@ export const updateStudentStatus = async (req, res, next) => {
 
 export const updateStudentSuspension = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
     const studentId = req.params.id;
 
     const suspension = parseJSON(req.body.suspension);
@@ -488,7 +496,7 @@ export const updateStudentSuspension = async (req, res, next) => {
 
 export const deleteStudent = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
     const studentId = req.params.id;
 
     const student = await Student.findOneAndDelete({

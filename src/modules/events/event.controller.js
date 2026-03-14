@@ -1,8 +1,25 @@
 import Event from "./event.model.js";
 
+const resolveSchoolId = (req) => {
+  const roleName = req.user?.roleId?.name;
+  if (roleName === "SuperAdmin") {
+    return req.query.schoolId || req.body.schoolId || req.params.schoolId || null;
+  }
+  return req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
+};
+
 export const createEvent = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          req.user?.roleId?.name === "SuperAdmin"
+            ? "schoolId is required in body for creating an event"
+            : "School context missing",
+      });
+    }
     const userId = req.user._id;
 
     const {
@@ -52,7 +69,16 @@ export const createEvent = async (req, res, next) => {
 
 export const getEvents = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          req.user?.roleId?.name === "SuperAdmin"
+            ? "schoolId is required (query or body). Example: ?schoolId=..."
+            : "School context missing",
+      });
+    }
     const { status, organizationFor, from, to } = req.query;
 
     const filter = { schoolId };
@@ -77,7 +103,16 @@ export const getEvents = async (req, res, next) => {
 
 export const getEventById = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          req.user?.roleId?.name === "SuperAdmin"
+            ? "schoolId is required (query or body)"
+            : "School context missing",
+      });
+    }
     const { id } = req.params;
 
     const event = await Event.findOne({ _id: id, schoolId });
@@ -100,7 +135,16 @@ export const getEventById = async (req, res, next) => {
 
 export const updateEvent = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          req.user?.roleId?.name === "SuperAdmin"
+            ? "schoolId is required (query or body)"
+            : "School context missing",
+      });
+    }
     const { id } = req.params;
 
     const event = await Event.findOne({ _id: id, schoolId });
@@ -150,7 +194,16 @@ export const updateEvent = async (req, res, next) => {
 
 export const deleteEvent = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId;
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          req.user?.roleId?.name === "SuperAdmin"
+            ? "schoolId is required (query or body)"
+            : "School context missing",
+      });
+    }
     const { id } = req.params;
 
     const deleted = await Event.findOneAndDelete({ _id: id, schoolId });

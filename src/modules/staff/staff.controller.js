@@ -3,6 +3,14 @@ import User from "../user/user.model.js";
 import Role from "../auth/role.model.js";
 import bcrypt from "bcryptjs";
 
+const resolveSchoolId = (req) => {
+  const roleName = req.user?.roleId?.name;
+  if (roleName === "SuperAdmin") {
+    return req.query.schoolId || req.body.schoolId || req.params.schoolId || null;
+  }
+  return req.user.schoolId;
+};
+
 /**
  * Create Staff (Teacher / Principal / Staff)
  * Only Admin
@@ -89,7 +97,7 @@ export const createStaff = async (req, res, next) => {
       password,
     } = req.body;
 
-    const schoolId = req.user.schoolId; // ✅ JWT se
+    const schoolId = resolveSchoolId(req); // SuperAdmin can target a school
 
     let user = null;
 
@@ -161,7 +169,7 @@ export const createStaff = async (req, res, next) => {
 
 export const getStaff = async (req, res, next) => {
   try {
-    const schoolId = req.user.schoolId; // JWT se schoolId
+    const schoolId = resolveSchoolId(req);
 
     const staff = await Staff.find({ schoolId }).populate(
       "userId",
