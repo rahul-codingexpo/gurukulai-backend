@@ -12,6 +12,7 @@ import classTimetableRoutes from "../modules/classTimetable/classTimetable.route
 import staffRoutes from "../modules/staff/staff.routes.js";
 import studentRoutes from "../modules/student/student.routes.js";
 import eventRoutes from "../modules/events/event.routes.js";
+import leaveRoutes from "../modules/leaves/leave.routes.js";
 const router = express.Router();
 
 router.use("/auth", authRoutes);
@@ -27,6 +28,7 @@ router.use("/sections", sectionRoutes);
 router.use("/timetable", timetableRoutes);
 router.use("/class-timetable", classTimetableRoutes);
 router.use("/attendance", attendanceRoutes);
+router.use("/leaves", leaveRoutes);
 router.get("/health", (req, res) => {
   res.json({
     success: true,
