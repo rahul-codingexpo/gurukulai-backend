@@ -25,11 +25,11 @@ router.post(
   markStudentAttendance,
 );
 
-// Get by date (optional: className, section) – Admin, Principal, Teacher
+// Get attendance – Admin, Principal, Teacher (all/ filters), Student (own only)
 router.get(
   "/students",
   protect,
-  authorize("Admin", "Principal", "Teacher"),
+  authorize("Admin", "Principal", "Teacher", "Student"),
   getStudentAttendanceByDate,
 );
 
@@ -58,11 +58,11 @@ router.post(
   markStaffAttendance,
 );
 
-// Get by date – Admin, Principal
+// Get attendance – Admin, Principal (all/ filters), Staff, Teacher, Principal (own only)
 router.get(
   "/staff",
   protect,
-  authorize("Admin", "Principal"),
+  authorize("Admin", "Principal", "Teacher", "Staff"),
   getStaffAttendanceByDate,
 );
 

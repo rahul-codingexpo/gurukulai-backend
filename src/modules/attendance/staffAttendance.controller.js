@@ -1,4 +1,5 @@
 import StaffAttendance from "./staffAttendance.model.js";
+import Staff from "../staff/staff.model.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -99,36 +100,78 @@ export const markStaffAttendance = async (req, res, next) => {
 };
 
 /**
- * Get staff attendance by date.
- * Response: staffId, name, role (designation), status, entryTime, exitTime.
+ * Get staff attendance.
+ * - date is optional; use dateFrom/dateTo for range, or omit for last 365 days.
+ * - If role is Staff/Teacher/Principal: returns only that staff's attendance ("my attendance").
+ * - If role is Admin/Principal: can filter by date, staffId.
  */
 export const getStaffAttendanceByDate = async (req, res, next) => {
   try {
-    const schoolId = resolveSchoolId(req);
+    const roleName = req.user?.roleId?.name;
+    let schoolId = resolveSchoolId(req);
+
+    // Staff/Teacher/Principal viewing own attendance
+    if (["Staff", "Teacher", "Principal"].includes(roleName)) {
+      const staff = await Staff.findOne({ userId: req.user._id }).select(
+        "_id schoolId"
+      );
+      if (!staff) {
+        return res.status(404).json({
+          success: false,
+          message: "Staff profile not found for this user",
+        });
+      }
+      schoolId = staff.schoolId;
+      req._resolvedStaffId = staff._id;
+    }
+
     if (!schoolId) {
       return res.status(400).json({
         success: false,
         message:
-          req.user?.roleId?.name === "SuperAdmin"
+          roleName === "SuperAdmin"
             ? "schoolId is required (query). Example: ?schoolId=..."
             : "School context missing",
       });
     }
 
-    const { date } = req.query;
-    if (!date) {
-      return res.status(400).json({
-        success: false,
-        message: "date is required (query)",
-      });
+    const { date, dateFrom, dateTo, staffId } = req.query;
+
+    const filter = { schoolId };
+
+    if (req._resolvedStaffId) {
+      filter.staffId = req._resolvedStaffId;
+    } else if (staffId) {
+      filter.staffId = staffId;
     }
 
-    const dateOnly = new Date(date);
-    dateOnly.setHours(0, 0, 0, 0);
+    if (date) {
+      const dateOnly = new Date(date);
+      dateOnly.setHours(0, 0, 0, 0);
+      filter.date = dateOnly;
+    } else if (dateFrom || dateTo) {
+      filter.date = {};
+      if (dateFrom) {
+        const d = new Date(dateFrom);
+        d.setHours(0, 0, 0, 0);
+        filter.date.$gte = d;
+      }
+      if (dateTo) {
+        const d = new Date(dateTo);
+        d.setHours(23, 59, 59, 999);
+        filter.date.$lte = d;
+      }
+    } else {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - 365);
+      start.setHours(0, 0, 0, 0);
+      filter.date = { $gte: start, $lte: end };
+    }
 
-    const records = await StaffAttendance.find({ schoolId, date: dateOnly })
+    const records = await StaffAttendance.find(filter)
       .populate("staffId", "name designation")
-      .sort({ "staffId.name": 1 });
+      .sort({ date: -1, "staffId.name": 1 });
 
     const data = records.map((r) => ({
       _id: r._id,

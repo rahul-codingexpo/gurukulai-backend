@@ -103,38 +103,83 @@ export const markStudentAttendance = async (req, res, next) => {
 };
 
 /**
- * Get student attendance by date (optional: class/section filters via query).
- * Response includes student name, roll number, class, status, marked by teacher.
+ * Get student attendance.
+ * - date is optional; use dateFrom/dateTo for range, or omit for all (limited to last 365 days).
+ * - If role is Student: returns only that student's attendance ("my attendance").
+ * - If role is Admin/Principal/Teacher: can filter by date, studentId, className, section.
  */
 export const getStudentAttendanceByDate = async (req, res, next) => {
   try {
-    const schoolId = resolveSchoolId(req);
+    const roleName = req.user?.roleId?.name;
+    let schoolId = resolveSchoolId(req);
+
+    // Student viewing own attendance: resolve schoolId and studentId from Student linked to this user
+    if (roleName === "Student") {
+      const student = await Student.findOne({
+        "studentLogin.userId": req.user._id,
+      }).select("_id schoolId");
+      if (!student) {
+        return res.status(404).json({
+          success: false,
+          message: "Student profile not found for this user",
+        });
+      }
+      schoolId = student.schoolId;
+      req._resolvedStudentId = student._id; // so filter uses only this student
+    }
+
     if (!schoolId) {
       return res.status(400).json({
         success: false,
         message:
-          req.user?.roleId?.name === "SuperAdmin"
+          roleName === "SuperAdmin"
             ? "schoolId is required (query). Example: ?schoolId=..."
             : "School context missing",
       });
     }
 
-    const { date, className, section } = req.query;
-    if (!date) {
-      return res.status(400).json({
-        success: false,
-        message: "date is required (query)",
-      });
+    const { date, dateFrom, dateTo, studentId, className, section } = req.query;
+
+    const filter = { schoolId };
+
+    // Restrict to own record when role is Student
+    if (req._resolvedStudentId) {
+      filter.studentId = req._resolvedStudentId;
+    } else if (studentId) {
+      filter.studentId = studentId;
     }
 
-    const dateOnly = new Date(date);
-    dateOnly.setHours(0, 0, 0, 0);
+    // Date filter: single date, or range, or default last 365 days when no date given
+    if (date) {
+      const dateOnly = new Date(date);
+      dateOnly.setHours(0, 0, 0, 0);
+      filter.date = dateOnly;
+    } else if (dateFrom || dateTo) {
+      filter.date = {};
+      if (dateFrom) {
+        const d = new Date(dateFrom);
+        d.setHours(0, 0, 0, 0);
+        filter.date.$gte = d;
+      }
+      if (dateTo) {
+        const d = new Date(dateTo);
+        d.setHours(23, 59, 59, 999);
+        filter.date.$lte = d;
+      }
+    } else {
+      // No date: last 365 days to avoid huge responses
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - 365);
+      start.setHours(0, 0, 0, 0);
+      filter.date = { $gte: start, $lte: end };
+    }
 
-    const filter = { schoolId, date: dateOnly };
-    if (className || section) {
+    if (!req._resolvedStudentId && (className || section)) {
       const studentFilter = { schoolId };
       if (className) studentFilter.className = className;
       if (section) studentFilter.section = section;
+      if (studentId) studentFilter._id = studentId;
       const students = await Student.find(studentFilter).select("_id");
       filter.studentId = { $in: students.map((s) => s._id) };
     }
@@ -142,7 +187,7 @@ export const getStudentAttendanceByDate = async (req, res, next) => {
     const records = await StudentAttendance.find(filter)
       .populate("studentId", "name rollNumber className section")
       .populate("markedBy", "name")
-      .sort({ "studentId.name": 1 });
+      .sort({ date: -1, "studentId.name": 1 });
 
     const data = records.map((r) => ({
       _id: r._id,
