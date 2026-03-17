@@ -1225,6 +1225,128 @@ If some students fail (e.g. already promoted, or no mapping), they appear in `da
 
 ---
 
+## 17. Live Class
+
+Live class scheduling: **title**, **class**, **sections**, **date**, **time**, **subject**, **teacher**, **class link/URL**.
+
+**Roles:** Create/Update/Delete – Admin, Principal, Teacher; GET – any authenticated user. SuperAdmin must send `schoolId` in query/body.
+
+**Base path:** `/api/live-class`
+
+---
+
+### 17.1 Create Live Class
+
+**POST** `/api/live-class`
+
+**Headers:** `Authorization: Bearer <token>`, `Content-Type: application/json`
+
+**Body (JSON):**
+- `title` (required)
+- `classId` (required) – Class reference
+- `sectionIds` (optional) – Array of section IDs; can be empty
+- `date` (required) – ISO date string
+- `time` (required) – e.g. `"10:00"` or `"10:00 AM"`
+- `subjectId` (required)
+- `teacherId` (required) – User ID of teacher (teacher name returned via populate)
+- `classLink` (optional) – Meeting URL/link
+
+**Example:**
+```json
+{
+  "title": "Math Live Session - Algebra",
+  "classId": "CLASS_ID",
+  "sectionIds": ["SECTION_A_ID", "SECTION_B_ID"],
+  "date": "2026-03-15",
+  "time": "10:00 AM",
+  "subjectId": "SUBJECT_ID",
+  "teacherId": "TEACHER_USER_ID",
+  "classLink": "https://meet.example.com/abc-xyz"
+}
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "...",
+    "title": "Math Live Session - Algebra",
+    "classId": { "_id": "...", "name": "Grade 5" },
+    "sectionIds": [{ "_id": "...", "name": "A" }, { "_id": "...", "name": "B" }],
+    "date": "2026-03-15T00:00:00.000Z",
+    "time": "10:00 AM",
+    "subjectId": { "_id": "...", "name": "Mathematics", "code": "MATH" },
+    "teacherId": { "_id": "...", "name": "Ramesh Kumar" },
+    "classLink": "https://meet.example.com/abc-xyz",
+    "schoolId": "...",
+    "createdAt": "..."
+  }
+}
+```
+
+---
+
+### 17.2 List Live Classes
+
+**GET** `/api/live-class`
+
+**Query:** `classId`, `subjectId`, `teacherId`, `dateFrom`, `dateTo`, `schoolId` (SuperAdmin)
+
+**Example:** `GET /api/live-class?classId=CLASS_ID&dateFrom=2026-03-01&dateTo=2026-03-31`
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "...",
+      "title": "Math Live Session - Algebra",
+      "classId": { "name": "Grade 5" },
+      "sectionIds": [{ "name": "A" }, { "name": "B" }],
+      "date": "2026-03-15T00:00:00.000Z",
+      "time": "10:00 AM",
+      "subjectId": { "name": "Mathematics", "code": "MATH" },
+      "teacherId": { "name": "Ramesh Kumar" },
+      "classLink": "https://meet.example.com/abc-xyz"
+    }
+  ]
+}
+```
+
+---
+
+### 17.3 Get Live Class by ID
+
+**GET** `/api/live-class/:id`
+
+**Query:** `schoolId` (SuperAdmin)
+
+**Response (200):** `{ "success": true, "data": { ... } }`
+
+---
+
+### 17.4 Update Live Class
+
+**PUT** `/api/live-class/:id`
+
+**Body (JSON):** Same fields as create (all optional for update).
+
+**Response (200):** `{ "success": true, "data": { ... } }`
+
+---
+
+### 17.5 Delete Live Class
+
+**DELETE** `/api/live-class/:id`
+
+**Query:** `schoolId` (SuperAdmin)
+
+**Response (200):** `{ "success": true, "message": "Live class deleted" }`
+
+---
+
 ## Common Error Responses
 
 - **401 Unauthorized:** `{ "success": false, "message": "Not authorized, token missing" }` or `"Invalid token"`
