@@ -31,4 +31,27 @@ const upload = multer({
   fileFilter,
 });
 
+// Study materials: allow PDFs and images
+const studyMaterialFileFilter = (req, file, cb) => {
+  const allowed = [
+    "image/png",
+    "image/jpg",
+    "image/jpeg",
+    "image/webp",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ];
+  if (allowed.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only PDF, Word and image files allowed"), false);
+  }
+};
+
+export const uploadStudyMaterials = multer({
+  storage,
+  fileFilter: studyMaterialFileFilter,
+});
+
 export default upload;
