@@ -1,5 +1,5 @@
 import express from "express";
-import { createSchool, getSchools, updateSchool } from "./school.controller.js";
+import { createSchool, getSchools, updateSchool, deleteSchool } from "./school.controller.js";
 import { onboardSchool } from "./school.onboard.controller.js";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
