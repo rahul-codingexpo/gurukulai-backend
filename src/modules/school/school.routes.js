@@ -36,4 +36,12 @@ router.put(
 
 router.post("/onboard", protect, authorize("SuperAdmin"), onboardSchool);
 
+//delete route
+router.delete(
+  "/:id",
+  protect,
+  authorize("SuperAdmin"),
+  deleteSchool,
+);
+
 export default router;
