@@ -60,3 +60,59 @@ export const activateSession = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Update Session
+ */
+export const updateSession = async (req, res, next) => {
+  try {
+    const updates = { ...req.body };
+    delete updates.schoolId;
+
+    const session = await Session.findOneAndUpdate(
+      { _id: req.params.id, schoolId: req.schoolId },
+      updates,
+      { new: true, runValidators: true },
+    );
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Session not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: session,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Delete Session
+ */
+export const deleteSession = async (req, res, next) => {
+  try {
+    const session = await Session.findOneAndDelete({
+      _id: req.params.id,
+      schoolId: req.schoolId,
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Session not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Session deleted",
+    });
+  } catch (error) {
+    next(error);
+  }
+};

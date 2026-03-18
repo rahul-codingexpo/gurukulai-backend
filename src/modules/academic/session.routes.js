@@ -3,6 +3,8 @@ import {
   createSession,
   getSessions,
   activateSession,
+  updateSession,
+  deleteSession,
 } from "./session.controller.js";
 
 import { protect } from "../../middleware/auth.middleware.js";
