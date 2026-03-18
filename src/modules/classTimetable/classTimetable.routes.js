@@ -25,7 +25,7 @@ router.post(
 router.get(
   "/",
   protect,
-  authorize("Admin", "Principal", "Teacher"),
+  authorize("Admin", "Principal", "Teacher","SuperAdmin","Accountant","Librarian","Staff","Student","Parent"),
   getClassTimetables,
 );
 

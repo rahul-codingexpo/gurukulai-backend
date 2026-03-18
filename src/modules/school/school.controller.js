@@ -88,3 +88,11 @@ export const updateSchool = async (req, res, next) => {
     next(error);
   }
 };
+
+export const deleteSchool = async (req, res, next) => {
+  try {
+    await School.findByIdAndDelete(req.params.id);
+  } catch (error) {
+    next(error);
+  }
+};

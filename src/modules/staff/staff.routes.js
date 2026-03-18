@@ -18,7 +18,7 @@ router.post("/", protect, authorize("Admin", "Principal"), createStaff);
 
 /* Get staff */
 
-router.get("/", protect, authorize("Admin", "Principal"), getStaff);
+router.get("/", protect, authorize("Admin", "Principal","SuperAdmin"), getStaff);
 
 /* Update staff */
 

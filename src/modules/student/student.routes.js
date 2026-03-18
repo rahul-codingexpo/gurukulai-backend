@@ -50,14 +50,14 @@ router.post(
 router.get(
   "/",
   protect,
-  authorize("Admin", "Principal", "Teacher"),
+  authorize("Admin", "Principal", "Teacher","SuperAdmin"),
   getStudents,
 );
 
 router.get(
   "/:id",
   protect,
-  authorize("Admin", "Principal", "Teacher"),
+  authorize("Admin", "Principal", "Teacher","SuperAdmin"),
   getStudentById,
 );
 
