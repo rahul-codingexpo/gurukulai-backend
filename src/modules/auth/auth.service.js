@@ -24,7 +24,9 @@ const enforceIdentifierByRole = ({ user, resolvedLoginId }) => {
 
   if (roleName && emailOnlyRoles.has(roleName)) {
     if (!user.email || normalizedEmail !== String(user.email).toLowerCase()) {
-      throw new Error("Email login required for this role");
+      const err = new Error("Email login required for this role");
+      err.statusCode = 401;
+      throw err;
     }
   }
 
@@ -34,7 +36,9 @@ const enforceIdentifierByRole = ({ user, resolvedLoginId }) => {
     const matchesUsername =
       user.username && String(resolvedLoginId) === String(user.username);
     if (!matchesPhone && !matchesUsername) {
-      throw new Error("Phone/username login required for this role");
+      const err = new Error("Phone/username login required for this role");
+      err.statusCode = 401;
+      throw err;
     }
   }
 };
@@ -46,7 +50,15 @@ export const loginService = async (body = {}) => {
   const resolvedLoginId = loginId || email || phone || username;
 
   if (!resolvedLoginId) {
-    throw new Error("loginId is required");
+    const err = new Error("loginId, email, phone or username is required");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!password) {
+    const err = new Error("password is required");
+    err.statusCode = 400;
+    throw err;
   }
 
   const normalizedEmail = String(resolvedLoginId).trim().toLowerCase();
@@ -62,15 +74,24 @@ export const loginService = async (body = {}) => {
     .populate("roleId");
 
   if (!user) {
-    throw new Error("User not found");
+    const err = new Error("Invalid credentials");
+    err.statusCode = 401;
+    throw err;
   }
 
-  enforceIdentifierByRole({ user, resolvedLoginId });
+  try {
+    enforceIdentifierByRole({ user, resolvedLoginId });
+  } catch (e) {
+    e.statusCode = 401;
+    throw e;
+  }
 
   const isMatch = await comparePassword(password, user.password);
 
   if (!isMatch) {
-    throw new Error("Invalid credentials");
+    const err = new Error("Invalid credentials");
+    err.statusCode = 401;
+    throw err;
   }
 
   const token = generateToken(user);
