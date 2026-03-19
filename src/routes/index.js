@@ -17,6 +17,7 @@ import studyMaterialRoutes from "../modules/studyMaterials/studyMaterial.routes.
 import homeworkRoutes from "../modules/homework/homework.routes.js";
 import promoteRoutes from "../modules/promote/promote.routes.js";
 import liveClassRoutes from "../modules/liveClass/liveClass.routes.js";
+import accountingRoutes from "../modules/accounting/accounting.routes.js";
 const router = express.Router();
 
 router.use("/auth", authRoutes);
@@ -37,6 +38,7 @@ router.use("/study-materials", studyMaterialRoutes);
 router.use("/homework", homeworkRoutes);
 router.use("/promote", promoteRoutes);
 router.use("/live-class", liveClassRoutes);
+router.use(accountingRoutes);
 router.get("/health", (req, res) => {
   res.json({
     success: true,
