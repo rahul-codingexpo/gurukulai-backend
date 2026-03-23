@@ -54,4 +54,24 @@ export const uploadStudyMaterials = multer({
   fileFilter: studyMaterialFileFilter,
 });
 
+// Bulk student import: allow Excel files
+const excelFileFilter = (req, file, cb) => {
+  const allowedMimes = [
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+    "application/vnd.ms-excel", // .xls
+  ];
+  const ext = path.extname(file.originalname || "").toLowerCase();
+
+  const allowedExt = [".xlsx", ".xls"].includes(ext);
+  const allowedMime = allowedMimes.includes(file.mimetype);
+
+  if (allowedExt || allowedMime) cb(null, true);
+  else cb(new Error("Only .xlsx or .xls Excel files are allowed"), false);
+};
+
+export const uploadExcel = multer({
+  storage,
+  fileFilter: excelFileFilter,
+});
+
 export default upload;

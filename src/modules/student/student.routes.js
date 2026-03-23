@@ -23,6 +23,7 @@ import { createAdmission } from "./student.controller.js";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
 import upload from "../../middleware/upload.middleware.js";
+import { uploadExcel } from "../../middleware/upload.middleware.js";
 import {
   getStudents,
   getStudentById,
@@ -30,6 +31,7 @@ import {
   updateStudentStatus,
   updateStudentSuspension,
   deleteStudent,
+  bulkCreateStudentsFromExcel,
 } from "./student.controller.js";
 
 const router = express.Router();
@@ -45,6 +47,18 @@ router.post(
     { name: "parentSignature", maxCount: 1 },
   ]),
   createAdmission,
+);
+
+// Bulk student admission via Excel (.xlsx/.xls)
+// multipart/form-data:
+// - file field: `excelFile`
+// - optional JSON fields: `studentLogin`, `parentLogin` (stringified JSON in frontend)
+router.post(
+  "/bulk-admission",
+  protect,
+  authorize("Admin", "Principal"),
+  uploadExcel.single("excelFile"),
+  bulkCreateStudentsFromExcel,
 );
 
 router.get(

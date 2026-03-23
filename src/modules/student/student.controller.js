@@ -115,6 +115,8 @@ import Student from "./student.model.js";
 import User from "../user/user.model.js";
 import Role from "../auth/role.model.js";
 import bcrypt from "bcryptjs";
+import * as XLSX from "xlsx";
+import fs from "fs";
 
 const buildPlaceholderEmail = (namespace, uniqueValue) => {
   const safe = String(uniqueValue || "")
@@ -337,6 +339,314 @@ export const createAdmission = async (req, res, next) => {
     res.status(201).json({
       success: true,
       data: student,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Bulk student admission via Excel (.xlsx/.xls)
+ *
+ * Expected excel columns (header row required):
+ * - name, gender, dob, admissionNumber, rollNumber, className, section, admissionDate
+ * - fatherName, fatherPhone, fatherOccupation
+ * - motherName, motherPhone, motherOccupation
+ * Optional:
+ * - studentPhone (if you want student login via phone)
+ * - fatherEmail (for parent user email; placeholder will be used if missing)
+ * - motherEmail (not used for login currently; included for future)
+ *
+ * Request (multipart/form-data):
+ * - excelFile: Excel file
+ * - studentLogin: JSON string (e.g. {"type":"NEW_USER","password":"123456"}) [optional]
+ * - parentLogin: JSON string (e.g. {"type":"NEW_USER","password":"123456"}) [optional]
+ */
+export const bulkCreateStudentsFromExcel = async (req, res, next) => {
+  try {
+    const schoolId = resolveSchoolId(req);
+
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          req.user?.roleId?.name === "SuperAdmin"
+            ? "schoolId is required (query or body)"
+            : "School context missing",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Excel file is required (.xlsx or .xls) under field `excelFile`",
+      });
+    }
+
+    const studentLogin = parseJSON(req.body.studentLogin, {});
+    const parentLogin = parseJSON(req.body.parentLogin, {});
+
+    const wantStudentLogin = studentLogin?.type === "NEW_USER";
+    const wantParentLogin = parentLogin?.type === "NEW_USER";
+
+    if (wantStudentLogin && !studentLogin?.password) {
+      return res.status(400).json({
+        success: false,
+        message: "studentLogin.password is required when studentLogin.type = NEW_USER",
+      });
+    }
+    if (wantParentLogin && !parentLogin?.password) {
+      return res.status(400).json({
+        success: false,
+        message: "parentLogin.password is required when parentLogin.type = NEW_USER",
+      });
+    }
+
+    const workbook = XLSX.readFile(req.file.path, { cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    // Each row becomes an object with keys from the header row.
+    // `defval: ""` prevents undefined values.
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+    const normalizeKey = (k) => String(k || "").trim().toLowerCase();
+
+    const pick = (row, keys) => {
+      for (const k of keys) {
+        const nk = normalizeKey(k);
+        // direct match
+        if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
+          return row[k];
+        }
+        // case-insensitive match
+        const matchKey = Object.keys(row).find((rk) => normalizeKey(rk) === nk);
+        if (matchKey) {
+          const v = row[matchKey];
+          if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+        }
+      }
+      return undefined;
+    };
+
+    const toDate = (v) => {
+      if (!v) return null;
+      if (v instanceof Date) return v;
+      // Excel might give serial date number
+      if (typeof v === "number") {
+        const parsed = XLSX.SSF.parse_date_code(v);
+        if (parsed) return new Date(parsed.y, parsed.m - 1, parsed.d);
+      }
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+
+    const toStr = (v) => (v === undefined || v === null ? "" : String(v).trim());
+    const toMaybeStr = (v) => {
+      const s = toStr(v);
+      return s ? s : undefined;
+    };
+
+    // If excel is huge, these caches reduce DB hits.
+    const roleStudent = wantStudentLogin ? await Role.findOne({ name: "Student" }) : null;
+    const roleParent = wantParentLogin ? await Role.findOne({ name: "Parent" }) : null;
+
+    if (wantStudentLogin && !roleStudent) {
+      return res.status(500).json({
+        success: false,
+        message: "Student role not found",
+      });
+    }
+    if (wantParentLogin && !roleParent) {
+      return res.status(500).json({
+        success: false,
+        message: "Parent role not found",
+      });
+    }
+
+    const studentPasswordHash = wantStudentLogin
+      ? await bcrypt.hash(studentLogin.password, 10)
+      : null;
+    const parentPasswordHash = wantParentLogin
+      ? await bcrypt.hash(parentLogin.password, 10)
+      : null;
+
+    // Precheck duplicates by admissionNumber
+    const admissionNumbers = rows
+      .map((r) => toStr(pick(r, ["admissionNumber", "admission number", "Admission Number", "AdmissionNo", "Admission No"])))
+      .filter((x) => x);
+
+    const existingStudents = await Student.find(
+      { schoolId, admissionNumber: { $in: admissionNumbers } },
+      { admissionNumber: 1 }
+    ).lean();
+    const existingSet = new Set(existingStudents.map((s) => s.admissionNumber));
+
+    // Parent user cache: phone/username -> userId
+    const parentUserCache = new Map();
+
+    const created = [];
+    const errors = [];
+    const skipped = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNo = i + 2; // assuming first row is header
+
+      try {
+        const name = pick(row, ["name", "studentName", "Student Name", "Name"]);
+        const gender = pick(row, ["gender", "Gender"]);
+        const dobRaw = pick(row, ["dob", "DOB", "dateOfBirth", "Date of Birth"]);
+        const admissionNumber = pick(row, ["admissionNumber", "Admission Number", "AdmissionNo", "Admission No"]);
+        const rollNumber = pick(row, ["rollNumber", "Roll Number", "Roll No", "Roll No."]);
+        const className = pick(row, ["className", "Class Name", "class", "grade", "Grade"]);
+        const section = pick(row, ["section", "Section", "sec", "Section Name"]);
+        const admissionDateRaw = pick(row, ["admissionDate", "Admission Date", "admission date", "Date"]);
+
+        const fatherName = pick(row, ["fatherName", "Father Name", "father.name", "Father"]);
+        const fatherPhone = pick(row, ["fatherPhone", "Father Phone"]);
+        const fatherOccupation = pick(row, ["fatherOccupation", "Father Occupation"]);
+        const fatherEmail = pick(row, ["fatherEmail", "Father Email"]);
+
+        const motherName = pick(row, ["motherName", "Mother Name", "mother.name", "Mother"]);
+        const motherPhone = pick(row, ["motherPhone", "Mother Phone"]);
+        const motherOccupation = pick(row, ["motherOccupation", "Mother Occupation"]);
+
+        if (!name || !admissionNumber || !className || !section || !admissionDateRaw || !fatherName || !fatherPhone || !motherName || !motherPhone) {
+          errors.push({
+            rowNo,
+            reason: "Missing required fields (name, admissionNumber, className, section, admissionDate, fatherName/fatherPhone, motherName/motherPhone)",
+          });
+          continue;
+        }
+
+        const normalizedAdmissionNumber = toStr(admissionNumber);
+        if (existingSet.has(normalizedAdmissionNumber)) {
+          skipped.push({
+            rowNo,
+            admissionNumber: normalizedAdmissionNumber,
+            reason: "Admission number already exists",
+          });
+          continue;
+        }
+
+        const dob = toDate(dobRaw);
+        const admissionDate = toDate(admissionDateRaw);
+
+        if (!admissionDate) {
+          errors.push({ rowNo, admissionNumber: normalizedAdmissionNumber, reason: "Invalid admissionDate" });
+          continue;
+        }
+
+        const studentPhone = toMaybeStr(pick(row, ["studentPhone", "student phone", "Student Phone", "phone"]));
+
+        // Create Student
+        const student = await Student.create({
+          schoolId,
+          name: toStr(name),
+          gender: toMaybeStr(gender),
+          dob: dob || undefined,
+          admissionNumber: normalizedAdmissionNumber,
+          rollNumber: toMaybeStr(rollNumber),
+          className: toStr(className),
+          section: toStr(section),
+          admissionDate,
+          parents: {
+            father: {
+              name: toStr(fatherName),
+              phone: toStr(fatherPhone),
+              occupation: toMaybeStr(fatherOccupation),
+              email: toMaybeStr(fatherEmail),
+            },
+            mother: {
+              name: toStr(motherName),
+              phone: toStr(motherPhone),
+              occupation: toMaybeStr(motherOccupation),
+            },
+          },
+        });
+
+        // STUDENT LOGIN
+        if (wantStudentLogin) {
+          const studentUsername = studentPhone || normalizedAdmissionNumber;
+          const studentEmail = buildPlaceholderEmail("student", studentPhone || normalizedAdmissionNumber);
+
+          const user = await User.create({
+            name: toStr(name),
+            username: studentUsername,
+            phone: studentPhone || undefined,
+            email: studentEmail,
+            password: studentPasswordHash,
+            roleId: roleStudent._id,
+            schoolId,
+          });
+
+          student.studentLogin = {
+            enabled: true,
+            userId: user._id,
+          };
+          await student.save();
+        }
+
+        // PARENT LOGIN (using father phone as per your createAdmission logic)
+        if (wantParentLogin) {
+          const parentKey = toStr(fatherPhone);
+          let parentUserId = parentUserCache.get(parentKey);
+
+          if (!parentUserId) {
+            let user = await User.findOne({
+              $or: [{ phone: parentKey }, { username: parentKey }],
+              schoolId,
+            });
+
+            if (!user) {
+              const parentEmail =
+                toMaybeStr(fatherEmail) || buildPlaceholderEmail("parent", parentKey);
+
+              user = await User.create({
+                name: toStr(fatherName),
+                username: parentKey,
+                phone: parentKey,
+                email: parentEmail,
+                password: parentPasswordHash,
+                roleId: roleParent._id,
+                schoolId,
+              });
+            }
+
+            parentUserId = user._id;
+            parentUserCache.set(parentKey, parentUserId);
+          }
+
+          student.parentLogin = {
+            enabled: true,
+            userId: parentUserId,
+          };
+          await student.save();
+        }
+
+        created.push({ rowNo, studentId: student._id, admissionNumber: normalizedAdmissionNumber });
+      } catch (rowErr) {
+        errors.push({
+          rowNo,
+          reason: rowErr?.message || "Row processing error",
+        });
+      }
+    }
+
+    // Cleanup uploaded excel
+    fs.unlink(req.file.path, () => {});
+
+    return res.json({
+      success: true,
+      data: {
+        createdCount: created.length,
+        skippedCount: skipped.length,
+        errorCount: errors.length,
+        created,
+        skipped,
+        errors: errors.length ? errors : undefined,
+      },
     });
   } catch (error) {
     next(error);
