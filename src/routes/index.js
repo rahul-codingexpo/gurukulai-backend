@@ -18,12 +18,14 @@ import homeworkRoutes from "../modules/homework/homework.routes.js";
 import promoteRoutes from "../modules/promote/promote.routes.js";
 import liveClassRoutes from "../modules/liveClass/liveClass.routes.js";
 import accountingRoutes from "../modules/accounting/accounting.routes.js";
+import tcRoutes from "../modules/tc/tc.routes.js";
 const router = express.Router();
 
 router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
 router.use("/schools", schoolRoutes);
 router.use("/staff", staffRoutes);
+router.use("/students/tc", tcRoutes);
 router.use("/students", studentRoutes);
 router.use("/events", eventRoutes);
 router.use("/sessions", sessionRoutes);
@@ -47,3 +49,5 @@ router.get("/health", (req, res) => {
 });
 
 export default router;
+
+
