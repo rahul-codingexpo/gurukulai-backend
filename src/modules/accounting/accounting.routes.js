@@ -24,6 +24,12 @@ import {
   getPaymentsByInvoiceId,
 } from "./payment.controller.js";
 import { getDashboard } from "./dashboard.controller.js";
+import { getStudentFeeStatus } from "./feeStatus.controller.js";
+import {
+  listWalletPayments,
+  approveWalletPayment,
+  rejectWalletPayment,
+} from "./walletApproval.controller.js";
 
 const router = express.Router();
 
@@ -138,6 +144,38 @@ router.get(
   authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   injectSchool,
   getDashboard
+);
+
+// ---------- Paid/Unpaid student table ----------
+router.get(
+  "/fee-status",
+  protect,
+  authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
+  injectSchool,
+  getStudentFeeStatus
+);
+
+// ---------- Wallet Payments (Student/Parent uploads) approval flow ----------
+router.get(
+  "/wallet-payments",
+  protect,
+  authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
+  injectSchool,
+  listWalletPayments
+);
+router.put(
+  "/wallet-payments/:id/approve",
+  protect,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  approveWalletPayment
+);
+router.put(
+  "/wallet-payments/:id/reject",
+  protect,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  rejectWalletPayment
 );
 
 export default router;

@@ -88,6 +88,20 @@ const schoolSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // School offline UPI collection setup (shown to parents/students on app)
+    upiId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    // Stored path to QR image for payments (e.g. /uploads/<filename>)
+    qrCode: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     website: {
       type: String,
     },

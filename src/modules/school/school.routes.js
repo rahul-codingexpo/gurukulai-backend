@@ -29,8 +29,12 @@ router.get("/", protect, getSchools);
 router.put(
   "/:id",
   protect,
-  upload.single("logo"),
-  authorize("SuperAdmin"),
+  upload.fields([
+    { name: "logo", maxCount: 1 },
+    { name: "qrCode", maxCount: 1 },
+    { name: "paymentQr", maxCount: 1 },
+  ]),
+  authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   updateSchool,
 );
 
