@@ -21,6 +21,7 @@ import accountingRoutes from "../modules/accounting/accounting.routes.js";
 import tcRoutes from "../modules/tc/tc.routes.js";
 import walletRoutes from "../modules/wallet/wallet.routes.js";
 import mobileRoutes from "../modules/mobile/mobileDashboard.routes.js";
+import examRoutes from "../modules/exam/exam.routes.js";
 const router = express.Router();
 
 router.use("/auth", authRoutes);
@@ -37,6 +38,7 @@ router.use("/classes", classRoutes);
 router.use("/sections", sectionRoutes);
 router.use("/timetable", timetableRoutes);
 router.use("/class-timetable", classTimetableRoutes);
+router.use("/academic/exams", examRoutes);
 router.use("/attendance", attendanceRoutes);
 router.use("/leaves", leaveRoutes);
 router.use("/study-materials", studyMaterialRoutes);

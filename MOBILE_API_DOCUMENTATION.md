@@ -530,6 +530,128 @@ These clean APIs map directly to your separate DB collections:
 }
 ```
 
+---
+
+## 8) Exams / Admit Card / Marksheet (Mobile GET)
+
+These are read APIs for mobile app screens.
+
+### 8.1 List exams
+**GET** `/api/mobile/exams?sessionId=&classId=&sectionId=`  
+**Auth:** Student / Parent / Teacher / Staff
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "EXAM_ID",
+      "name": "Half Yearly",
+      "sessionId": "SESSION_ID",
+      "sessionName": "2026-27",
+      "classId": "CLASS_ID",
+      "className": "Grade 7",
+      "sectionId": "SECTION_ID",
+      "sectionName": "A"
+    }
+  ]
+}
+```
+
+### 8.2 Get exam details (for admit card schedule)
+**GET** `/api/mobile/exams/:examId`  
+**Auth:** Student / Parent / Teacher / Staff
+
+**Response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "EXAM_ID",
+    "name": "Half Yearly",
+    "sessionId": "SESSION_ID",
+    "sessionName": "2026-27",
+    "classId": "CLASS_ID",
+    "className": "Grade 7",
+    "sectionId": "SECTION_ID",
+    "sectionName": "A",
+    "instructions": "Reach 30 min early",
+    "subjects": [
+      { "subjectId": "SUB_MATH", "subjectName": "Mathematics", "maxMarks": 100, "passMarks": 35 }
+    ],
+    "schedule": [
+      { "subjectId": "SUB_MATH", "subjectName": "Mathematics", "examDate": "2026-09-10T00:00:00.000Z", "startTime": "10:00", "endTime": "12:00" }
+    ]
+  }
+}
+```
+Returns exam meta + subjects + schedule + instructions.
+
+### 8.3 Get exam marks
+**GET** `/api/mobile/exams/:examId/marks`  
+**Optional:** `?studentId=STUDENT_ID`
+**Auth:** Student / Parent / Teacher / Staff
+**response**
+```json
+{
+  "success": true,
+  "data": {
+    "STUDENT_ID_1": {
+      "SUB_MATH": "82",
+      "SUB_ENG": "AB"
+    },
+    "STUDENT_ID_2": {
+      "SUB_MATH": "91",
+      "SUB_ENG": "88"
+    }
+  }
+}
+```
+**Behavior:**
+- Student/Parent: auto-returns only self student marks.
+- Teacher/Staff: can pass optional `studentId` query for specific student.
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "STUDENT_ID": {
+      "SUBJECT_ID_1": "82",
+      "SUBJECT_ID_2": "AB"
+    }
+  }
+}
+```
+
+### 8.4 Get students by exam scope (admit/marks entry helper)
+**GET** `/api/mobile/exams/:examId/students`  
+**Auth:** Teacher / Staff
+
+Returns students filtered by exam scope:
+- Class 1-10: by class
+- Class 11-12: by class + section
+
+**Response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "STUDENT_ID",
+      "name": "Rahul Sharma",
+      "admissionNumber": "ADM1002",
+      "rollNumber": "31",
+      "className": "7",
+      "section": "A"
+    }
+  ]
+}
+```
+
 **Student status update request (Teacher):**
 ```json
 {

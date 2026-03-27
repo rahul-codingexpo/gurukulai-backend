@@ -15,6 +15,12 @@ import {
 } from "./mobileAttendance.controller.js";
 import { getMobileTimetable } from "./mobileTimetable.controller.js";
 import {
+  mobileListExams,
+  mobileGetExamById,
+  mobileGetExamMarks,
+  getExamStudents,
+} from "../exam/exam.controller.js";
+import {
   applyMyLeaveMobile,
   getMyLeavesMobile,
   updateMyLeaveMobile,
@@ -100,6 +106,12 @@ router.post(
 // Teacher: own timetable by day
 // Admin/Principal: optional classId/sectionId/teacherId filters
 router.get("/timetable", protect, mobileOnly, getMobileTimetable);
+
+// -------- Exams / Admit / Marksheet (Mobile GET) --------
+router.get("/exams", protect, mobileOnly, mobileListExams);
+router.get("/exams/:examId", protect, mobileOnly, mobileGetExamById);
+router.get("/exams/:examId/students", protect, mobileOnly, getExamStudents);
+router.get("/exams/:examId/marks", protect, mobileOnly, mobileGetExamMarks);
 
 // -------- Leaves (Mobile clean APIs) --------
 router.post("/leaves/me/apply", protect, mobileOnly, applyMyLeaveMobile);
