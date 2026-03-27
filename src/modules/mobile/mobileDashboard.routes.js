@@ -20,6 +20,7 @@ import {
   mobileGetExamMarks,
   getExamStudents,
 } from "../exam/exam.controller.js";
+import { getGalleryList, getGalleryById } from "../gallery/gallery.controller.js";
 import {
   applyMyLeaveMobile,
   getMyLeavesMobile,
@@ -112,6 +113,10 @@ router.get("/exams", protect, mobileOnly, mobileListExams);
 router.get("/exams/:examId", protect, mobileOnly, mobileGetExamById);
 router.get("/exams/:examId/students", protect, mobileOnly, getExamStudents);
 router.get("/exams/:examId/marks", protect, mobileOnly, mobileGetExamMarks);
+
+// -------- Gallery (Mobile GET) --------
+router.get("/gallery", protect, mobileOnly, getGalleryList);
+router.get("/gallery/:id", protect, mobileOnly, getGalleryById);
 
 // -------- Leaves (Mobile clean APIs) --------
 router.post("/leaves/me/apply", protect, mobileOnly, applyMyLeaveMobile);

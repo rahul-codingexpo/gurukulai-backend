@@ -661,6 +661,173 @@ Returns students filtered by exam scope:
 
 ---
 
+## 9) Gallery (Web + Mobile)
+
+### 9.1 Upload gallery media (Web admin panel)
+**POST** `/api/gallery/upload`  
+**Auth:** Admin / Principal  
+**Content-Type:** `multipart/form-data`
+
+**Form fields:**
+- `title` (optional)
+- `description` (optional)
+- `mediaFiles` (required, multiple: image/video)
+
+**Success (201):**
+```json
+{
+  "success": true,
+  "message": "Media uploaded successfully",
+  "data": [
+    {
+      "_id": "GALLERY_ID",
+      "title": "Sports Day",
+      "description": "Opening ceremony",
+      "mediaType": "IMAGE",
+      "mediaUrl": "uploads/gallery/1773951200000-sports.jpg",
+      "mimeType": "image/jpeg",
+      "size": 145920,
+      "schoolId": "SCHOOL_ID"
+    }
+  ]
+}
+```
+
+### 9.2 List gallery items (Web)
+**GET** `/api/gallery?mediaType=IMAGE&search=sports`  
+**Auth:** Any authenticated school user
+**response**
+```json
+
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "GALLERY_ID",
+      "schoolId": "SCHOOL_ID",
+      "title": "Sports Day",
+      "description": "Opening ceremony",
+      "mediaType": "IMAGE",
+      "mediaUrl": "uploads/gallery/1773951200000-sports.jpg",
+      "mimeType": "image/jpeg",
+      "size": 145920,
+      "uploadedBy": {
+        "_id": "USER_ID",
+        "name": "Admin Name",
+        "roleId": "ROLE_ID"
+      },
+      "createdAt": "2026-03-27T10:00:00.000Z",
+      "updatedAt": "2026-03-27T10:00:00.000Z"
+    }
+  ]
+}
+
+```
+
+
+### 9.3 Get single gallery item (Web)
+**GET** `/api/gallery/:id`  
+**Auth:** Any authenticated school user
+
+**response**
+
+```json
+
+{
+  "success": true,
+  "data": {
+    "_id": "GALLERY_ID",
+    "schoolId": "SCHOOL_ID",
+    "title": "Sports Day",
+    "description": "Opening ceremony",
+    "mediaType": "IMAGE",
+    "mediaUrl": "uploads/gallery/1773951200000-sports.jpg",
+    "mimeType": "image/jpeg",
+    "size": 145920,
+    "uploadedBy": {
+      "_id": "USER_ID",
+      "name": "Admin Name",
+      "roleId": "ROLE_ID"
+    },
+    "createdAt": "2026-03-27T10:00:00.000Z",
+    "updatedAt": "2026-03-27T10:00:00.000Z"
+  }
+}
+```
+
+### 9.4 Update gallery item (Web admin panel)
+**PUT** `/api/gallery/:id`  
+**Auth:** Admin / Principal  
+**Content-Type:** `multipart/form-data` (optional `mediaFile`) or JSON
+
+### 9.5 Delete gallery item (Web admin panel)
+**DELETE** `/api/gallery/:id`  
+**Auth:** Admin / Principal
+
+### 9.6 Mobile gallery list
+**GET** `/api/mobile/gallery?mediaType=VIDEO&search=annual`  
+**Auth:** Student / Parent / Teacher / Staff
+
+**response**
+```json
+
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "GALLERY_ID",
+      "schoolId": "SCHOOL_ID",
+      "title": "Sports Day",
+      "description": "Opening ceremony",
+      "mediaType": "IMAGE",
+      "mediaUrl": "uploads/gallery/1773951200000-sports.jpg",
+      "mimeType": "image/jpeg",
+      "size": 145920,
+      "uploadedBy": {
+        "_id": "USER_ID",
+        "name": "Admin Name",
+        "roleId": "ROLE_ID"
+      },
+      "createdAt": "2026-03-27T10:00:00.000Z",
+      "updatedAt": "2026-03-27T10:00:00.000Z"
+    }
+  ]
+}
+
+```
+
+### 9.7 Mobile gallery details
+**GET** `/api/mobile/gallery/:id`  
+**Auth:** Student / Parent / Teacher / Staff
+**response**
+
+```json
+
+{
+  "success": true,
+  "data": {
+    "_id": "GALLERY_ID",
+    "schoolId": "SCHOOL_ID",
+    "title": "Sports Day",
+    "description": "Opening ceremony",
+    "mediaType": "IMAGE",
+    "mediaUrl": "uploads/gallery/1773951200000-sports.jpg",
+    "mimeType": "image/jpeg",
+    "size": 145920,
+    "uploadedBy": {
+      "_id": "USER_ID",
+      "name": "Admin Name",
+      "roleId": "ROLE_ID"
+    },
+    "createdAt": "2026-03-27T10:00:00.000Z",
+    "updatedAt": "2026-03-27T10:00:00.000Z"
+  }
+}
+```
+
+
+---
+
 ### 7.2 Staff Leave APIs
 
 - **Apply (self)**: `POST /api/mobile/leaves/staff/me/apply`
