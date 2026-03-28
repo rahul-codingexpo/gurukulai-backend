@@ -25,6 +25,23 @@ const feeInvoiceSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    /** Original fee amount before discount (same as legacy `amount` when no discount) */
+    baseAmount: {
+      type: Number,
+      min: 0,
+    },
+    discountPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    /** Final payable after discount (balance uses amount - paid) */
     amount: {
       type: Number,
       required: true,
@@ -58,6 +75,16 @@ feeInvoiceSchema.index({ status: 1, schoolId: 1 });
 feeInvoiceSchema.index({ schoolId: 1, feeTypeId: 1, period: 1 });
 
 feeInvoiceSchema.pre("save", async function () {
+  // Legacy docs without discount fields: treat stored amount as base (no discount)
+  if (this.baseAmount == null || this.baseAmount === undefined) {
+    this.baseAmount = this.amount;
+    if (this.discountPercent == null || this.discountPercent === undefined) {
+      this.discountPercent = 0;
+    }
+    if (this.discountAmount == null || this.discountAmount === undefined) {
+      this.discountAmount = 0;
+    }
+  }
   if (this.paid >= this.amount) {
     this.status = "Paid";
     if (!this.paidDate) this.paidDate = new Date();

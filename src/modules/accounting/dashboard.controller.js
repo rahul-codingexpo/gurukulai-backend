@@ -35,6 +35,7 @@ export const getDashboard = async (req, res, next) => {
       overdueResult,
       pendingStudentCount,
       overdueInvoiceCount,
+      totalDiscountResult,
     ] = await Promise.all([
       FeeInvoice.aggregate([
         { $match: { schoolId: schoolId, status: "Paid" } },
@@ -67,12 +68,27 @@ export const getDashboard = async (req, res, next) => {
         status: { $in: ["Pending", "Partial", "Overdue"] },
       }).then((ids) => ids.length),
       FeeInvoice.countDocuments({ schoolId, status: "Overdue" }),
+      FeeInvoice.aggregate([
+        {
+          $match: {
+            schoolId: schoolId,
+            status: { $ne: "Cancelled" },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: { $ifNull: ["$discountAmount", 0] } },
+          },
+        },
+      ]),
     ]);
 
     const totalRevenue = totalRevenueResult[0]?.total ?? 0;
     const collectedThisMonth = collectedThisMonthResult[0]?.total ?? 0;
     const pendingFees = pendingResult[0]?.total ?? 0;
     const overdueAmount = overdueResult[0]?.total ?? 0;
+    const totalDiscountGiven = totalDiscountResult[0]?.total ?? 0;
 
     const yearStart = new Date(now.getFullYear(), 0, 1);
     const paymentsByMonth = await Payment.aggregate([
@@ -134,6 +150,9 @@ export const getDashboard = async (req, res, next) => {
         : "—",
       feeType: inv.feeTypeId?.name ?? "—",
       amount: inv.amount,
+      baseAmount: inv.baseAmount ?? inv.amount,
+      discountPercent: inv.discountPercent ?? 0,
+      discountAmount: inv.discountAmount ?? 0,
       status: inv.status,
       date: inv.createdAt,
     }));
@@ -145,6 +164,7 @@ export const getDashboard = async (req, res, next) => {
         collectedThisMonth,
         pendingFees,
         overdueAmount,
+        totalDiscountGiven,
         pendingStudentCount,
         overdueInvoiceCount,
         monthlyCollection,

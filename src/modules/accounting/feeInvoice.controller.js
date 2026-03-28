@@ -3,6 +3,26 @@ import FeeType from "./feeType.model.js";
 import Payment from "./payment.model.js";
 import Student from "../student/student.model.js";
 
+/** Money rounding (2 decimals) */
+export const roundMoney = (n) => Math.round(Number(n) * 100) / 100;
+
+/**
+ * Request body `amount` is the base (pre-discount) amount.
+ * Returns final payable in `amount`, plus discount breakdown.
+ */
+export const computeInvoiceAmounts = (baseAmount, discountPercent = 0) => {
+  const base = roundMoney(baseAmount);
+  const pct = Math.min(100, Math.max(0, Number(discountPercent) || 0));
+  const discountAmount = roundMoney(base * (pct / 100));
+  const finalAmount = roundMoney(base - discountAmount);
+  return {
+    baseAmount: base,
+    discountPercent: pct,
+    discountAmount,
+    amount: finalAmount,
+  };
+};
+
 const requireSchool = (req, res) => {
   if (!req.schoolId) {
     res.status(400).json({
@@ -54,17 +74,39 @@ async function markOverdue(schoolId) {
 export const createInvoice = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const { studentId, feeTypeId, amount, dueDate, period, remarks } = req.body || {};
+    const {
+      studentId,
+      feeTypeId,
+      amount,
+      dueDate,
+      period,
+      remarks,
+      discountPercent = 0,
+    } = req.body || {};
     if (!studentId || !feeTypeId || amount == null || !dueDate) {
       return res.status(400).json({
         success: false,
-        message: "studentId, feeTypeId, amount and dueDate are required",
+        message: "studentId, feeTypeId, amount (base before discount) and dueDate are required",
       });
     }
-    if (amount <= 0) {
+    const pct = Number(discountPercent);
+    if (Number.isNaN(pct) || pct < 0 || pct > 100) {
       return res.status(400).json({
         success: false,
-        message: "amount must be greater than 0",
+        message: "discountPercent must be between 0 and 100",
+      });
+    }
+    if (Number(amount) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "amount (base before discount) must be greater than 0",
+      });
+    }
+    const computed = computeInvoiceAmounts(amount, pct);
+    if (computed.amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Final payable after discount must be greater than 0",
       });
     }
     const periodStr = period ? String(period).trim() : "";
@@ -87,7 +129,10 @@ export const createInvoice = async (req, res, next) => {
       invoiceNumber,
       studentId,
       feeTypeId,
-      amount: Number(amount),
+      baseAmount: computed.baseAmount,
+      discountPercent: computed.discountPercent,
+      discountAmount: computed.discountAmount,
+      amount: computed.amount,
       paid: 0,
       status: "Pending",
       dueDate: new Date(dueDate),
@@ -107,18 +152,40 @@ export const createInvoice = async (req, res, next) => {
 export const createBulkInvoices = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const { className, section, feeTypeId, amount, dueDate, period, remarks } =
-      req.body || {};
+    const {
+      className,
+      section,
+      feeTypeId,
+      amount,
+      dueDate,
+      period,
+      remarks,
+      discountPercent = 0,
+    } = req.body || {};
     if (!className || section == null || !feeTypeId || amount == null || !dueDate) {
       return res.status(400).json({
         success: false,
-        message: "className, section, feeTypeId, amount and dueDate are required",
+        message: "className, section, feeTypeId, amount (base before discount) and dueDate are required",
       });
     }
-    if (amount <= 0) {
+    const pct = Number(discountPercent);
+    if (Number.isNaN(pct) || pct < 0 || pct > 100) {
       return res.status(400).json({
         success: false,
-        message: "amount must be greater than 0",
+        message: "discountPercent must be between 0 and 100",
+      });
+    }
+    if (Number(amount) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "amount (base before discount) must be greater than 0",
+      });
+    }
+    const computed = computeInvoiceAmounts(amount, pct);
+    if (computed.amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Final payable after discount must be greater than 0",
       });
     }
     const students = await Student.find({
@@ -149,7 +216,10 @@ export const createBulkInvoices = async (req, res, next) => {
         invoiceNumber,
         studentId: s._id,
         feeTypeId,
-        amount: Number(amount),
+        baseAmount: computed.baseAmount,
+        discountPercent: computed.discountPercent,
+        discountAmount: computed.discountAmount,
+        amount: computed.amount,
         paid: 0,
         status: "Pending",
         dueDate: new Date(dueDate),
@@ -268,7 +338,7 @@ export const getInvoiceById = async (req, res, next) => {
   }
 };
 
-/** Update invoice (e.g. amount, dueDate); new amount must be >= paid */
+/** Update invoice (e.g. base amount, discount, dueDate); final amount must be >= paid */
 export const updateInvoice = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
@@ -279,16 +349,55 @@ export const updateInvoice = async (req, res, next) => {
     if (!invoice) {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
-    const { amount, dueDate, period, remarks, status } = req.body || {};
-    if (amount !== undefined) {
-      const num = Number(amount);
-      if (num < invoice.paid) {
+    const { amount, baseAmount, dueDate, period, remarks, status, discountPercent } =
+      req.body || {};
+
+    const hasPricingUpdate =
+      baseAmount !== undefined ||
+      amount !== undefined ||
+      discountPercent !== undefined;
+
+    if (hasPricingUpdate) {
+      const prevBase =
+        invoice.baseAmount != null ? invoice.baseAmount : invoice.amount;
+      let base = prevBase;
+      if (baseAmount !== undefined) base = Number(baseAmount);
+      else if (amount !== undefined) base = Number(amount);
+
+      let pct = invoice.discountPercent ?? 0;
+      if (discountPercent !== undefined) pct = Number(discountPercent);
+
+      if (Number.isNaN(base) || base <= 0) {
         return res.status(400).json({
           success: false,
-          message: `Amount cannot be less than already paid (₹${invoice.paid})`,
+          message: "Base amount must be greater than 0",
         });
       }
-      invoice.amount = num;
+      if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+        return res.status(400).json({
+          success: false,
+          message: "discountPercent must be between 0 and 100",
+        });
+      }
+
+      const computed = computeInvoiceAmounts(base, pct);
+      if (computed.amount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Final payable after discount must be greater than 0",
+        });
+      }
+      if (computed.amount < invoice.paid) {
+        return res.status(400).json({
+          success: false,
+          message: `Final amount cannot be less than already paid (₹${invoice.paid})`,
+        });
+      }
+
+      invoice.baseAmount = computed.baseAmount;
+      invoice.discountPercent = computed.discountPercent;
+      invoice.discountAmount = computed.discountAmount;
+      invoice.amount = computed.amount;
     }
     if (dueDate !== undefined) invoice.dueDate = new Date(dueDate);
     if (period !== undefined) invoice.period = String(period).trim();
