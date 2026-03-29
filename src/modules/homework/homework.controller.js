@@ -19,6 +19,13 @@ const parseBoolean = (v) => {
   return undefined;
 };
 
+const parseOptionalMaxScore = (v) => {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
+};
+
 /** Assign homework – Teacher, Admin, Principal */
 export const createHomework = async (req, res, next) => {
   try {
@@ -39,6 +46,9 @@ export const createHomework = async (req, res, next) => {
     const subjectId = body.subjectId;
     const title = body.title;
     const description = body.description || "";
+    const topic =
+      body.topic !== undefined ? String(body.topic).trim() : "";
+    const maxScoreParsed = parseOptionalMaxScore(body.maxScore);
     const date = body.date ? new Date(body.date) : new Date();
     const dueDate = body.dueDate ? new Date(body.dueDate) : null;
     const url = body.url || "";
@@ -77,6 +87,8 @@ export const createHomework = async (req, res, next) => {
       sectionId,
       subjectId,
       title,
+      topic,
+      ...(maxScoreParsed !== undefined ? { maxScore: maxScoreParsed } : {}),
       description,
       date,
       dueDate,
@@ -209,6 +221,15 @@ export const updateHomework = async (req, res, next) => {
     if (body.sectionId !== undefined) homework.sectionId = body.sectionId;
     if (body.subjectId !== undefined) homework.subjectId = body.subjectId;
     if (body.title !== undefined) homework.title = body.title;
+    if (body.topic !== undefined) homework.topic = String(body.topic).trim();
+    if (body.maxScore !== undefined) {
+      if (body.maxScore === null || body.maxScore === "") {
+        homework.set("maxScore", undefined);
+      } else {
+        const n = parseOptionalMaxScore(body.maxScore);
+        if (n !== undefined) homework.maxScore = n;
+      }
+    }
     if (body.description !== undefined) homework.description = body.description;
     if (body.date !== undefined) homework.date = new Date(body.date);
     if (body.dueDate !== undefined) homework.dueDate = new Date(body.dueDate);

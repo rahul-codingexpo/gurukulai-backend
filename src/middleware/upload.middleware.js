@@ -49,9 +49,12 @@ const studyMaterialFileFilter = (req, file, cb) => {
   }
 };
 
+const TEN_MB = 10 * 1024 * 1024;
+
 export const uploadStudyMaterials = multer({
   storage,
   fileFilter: studyMaterialFileFilter,
+  limits: { fileSize: TEN_MB },
 });
 
 // Bulk student import: allow Excel files

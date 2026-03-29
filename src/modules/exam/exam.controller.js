@@ -47,9 +47,12 @@ const normalizeExam = (examDoc) => {
     sectionId: e.sectionId?._id || e.sectionId || null,
     sectionName: e.sectionId?.name || null,
     instructions: e.instructions || "",
+    syllabusUrl: (e.syllabusUrl || "").trim() || null,
     subjects: (e.subjects || []).map((s) => ({
       subjectId: s.subjectId?._id || s.subjectId,
       subjectName: s.subjectId?.name || "",
+      subjectCode: s.subjectId?.code || "",
+      examType: (s.subjectId?.type || "").trim() || null,
       maxMarks: s.maxMarks,
       passMarks: s.passMarks,
     })),
@@ -57,6 +60,8 @@ const normalizeExam = (examDoc) => {
       subjectId: x.subjectId?._id || x.subjectId,
       subjectName:
         x.subjectId?.name || subjectNameMap.get(String(x.subjectId?._id || x.subjectId)) || "",
+      subjectCode: x.subjectId?.code || "",
+      examType: (x.subjectId?.type || "").trim() || null,
       examDate: x.examDate,
       startTime: x.startTime,
       endTime: x.endTime,
@@ -137,6 +142,7 @@ export const createExam = async (req, res, next) => {
       classId: payload.classId,
       sectionId: payload.sectionId || null,
       instructions: payload.instructions || "",
+      syllabusUrl: payload.syllabusUrl != null ? String(payload.syllabusUrl).trim() : "",
       subjects: payload.subjects.map((s) => ({
         subjectId: s.subjectId,
         maxMarks: Number(s.maxMarks),
@@ -154,8 +160,8 @@ export const createExam = async (req, res, next) => {
       .populate("sessionId", "name")
       .populate("classId", "name")
       .populate("sectionId", "name")
-      .populate("subjects.subjectId", "name")
-      .populate("schedule.subjectId", "name");
+      .populate("subjects.subjectId", "name code type")
+      .populate("schedule.subjectId", "name code type");
 
     res.status(201).json({ success: true, data: normalizeExam(detailed) });
   } catch (error) {
@@ -206,8 +212,8 @@ export const getExamById = async (req, res, next) => {
       .populate("sessionId", "name")
       .populate("classId", "name")
       .populate("sectionId", "name")
-      .populate("subjects.subjectId", "name")
-      .populate("schedule.subjectId", "name");
+      .populate("subjects.subjectId", "name code type")
+      .populate("schedule.subjectId", "name code type");
 
     if (!exam) return res.status(404).json({ success: false, message: "Exam not found" });
     res.json({ success: true, data: normalizeExam(exam) });
@@ -228,6 +234,10 @@ export const updateExam = async (req, res, next) => {
       classId: req.body.classId ?? existing.classId,
       sectionId: req.body.sectionId === undefined ? existing.sectionId : req.body.sectionId,
       instructions: req.body.instructions ?? existing.instructions,
+      syllabusUrl:
+        req.body.syllabusUrl === undefined
+          ? existing.syllabusUrl
+          : String(req.body.syllabusUrl || "").trim(),
       subjects: req.body.subjects ?? existing.subjects,
       schedule: req.body.schedule ?? existing.schedule,
     };
@@ -240,6 +250,7 @@ export const updateExam = async (req, res, next) => {
     existing.classId = merged.classId;
     existing.sectionId = merged.sectionId || null;
     existing.instructions = merged.instructions || "";
+    existing.syllabusUrl = merged.syllabusUrl || "";
     existing.subjects = merged.subjects.map((s) => ({
       subjectId: s.subjectId,
       maxMarks: Number(s.maxMarks),
@@ -257,8 +268,8 @@ export const updateExam = async (req, res, next) => {
       .populate("sessionId", "name")
       .populate("classId", "name")
       .populate("sectionId", "name")
-      .populate("subjects.subjectId", "name")
-      .populate("schedule.subjectId", "name");
+      .populate("subjects.subjectId", "name code type")
+      .populate("schedule.subjectId", "name code type");
     res.json({ success: true, data: normalizeExam(detailed) });
   } catch (error) {
     next(error);
@@ -396,10 +407,6 @@ export const upsertExamMarks = async (req, res, next) => {
     next(error);
   }
 };
-
-// Mobile read APIs
-export const mobileListExams = listExams;
-export const mobileGetExamById = getExamById;
 
 export const mobileGetExamMarks = async (req, res, next) => {
   try {

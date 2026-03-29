@@ -534,60 +534,140 @@ These clean APIs map directly to your separate DB collections:
 
 ## 8) Exams / Admit Card / Marksheet (Mobile GET)
 
-These are read APIs for mobile app screens.
+Read-only APIs shaped for the student **Exams** list (tabs + cards) and **exam schedule** screen (per-subject rows).  
+**Student / Parent:** exams are **scoped automatically** to the linked student’s class and section (same rules as homework/timetable).  
+**Teacher / Staff:** exams for the user’s school; optional query filters apply.
 
-### 8.1 List exams
-**GET** `/api/mobile/exams?sessionId=&classId=&sectionId=`  
+Optional **`syllabusUrl`** on each exam (set from web when creating/updating an exam) powers **View syllabus**; if only **`instructions`** text is set, `hasSyllabus` is still `true` so the app can open an instructions screen.
+
+**Status rules** (from schedule dates, date-only UTC):
+- **UPCOMING** — first paper is after today  
+- **ONGOING** — today falls on or between first and last paper dates  
+- **COMPLETED** — last paper date is before today  
+
+---
+
+### 8.1 List exams (mobile cards + tab counts)
+
+**GET** `/api/mobile/exams`  
 **Auth:** Student / Parent / Teacher / Staff
 
-**Success (200):**
+#### Query parameters
+
+| Param | Who | Description |
+|--------|-----|-------------|
+| `status` | All | `all` (default), `upcoming`, `ongoing`, `completed` — matches tabs **All / Upcoming / Ongoing / Completed** |
+| `sessionId` | All | Optional — limit to one academic session |
+| `classId` | Teacher / Staff only | Optional filter |
+| `sectionId` | Teacher / Staff only | Optional filter |
+
+**No request body.**
+
+#### Success response (200)
+
 ```json
 {
   "success": true,
+  "summary": {
+    "upcoming": 2,
+    "ongoing": 1,
+    "completed": 3
+  },
   "data": [
     {
       "id": "EXAM_ID",
-      "name": "Half Yearly",
+      "title": "Final Term Exam",
+      "name": "Final Term Exam",
+      "displayDate": "11-02-2026",
+      "dateStart": "2026-02-10T00:00:00.000Z",
+      "dateEnd": "2026-02-15T00:00:00.000Z",
+      "status": "UPCOMING",
+      "statusKey": "upcoming",
       "sessionId": "SESSION_ID",
       "sessionName": "2026-27",
       "classId": "CLASS_ID",
       "className": "Grade 7",
       "sectionId": "SECTION_ID",
-      "sectionName": "A"
+      "sectionName": "A",
+      "syllabusUrl": "https://school.example.org/syllabus/final-term.pdf",
+      "hasSyllabus": true
     }
   ]
 }
 ```
 
-### 8.2 Get exam details (for admit card schedule)
+- **`summary`** counts are computed **before** applying `status` (but **after** session/class filters), so tab badges stay consistent with **All exams**.  
+- **`displayDate`** is the **first** paper date (`DD-MM-YYYY`) for the card header.  
+- **`title`** duplicates **`name`** for UI labels.  
+- Show **View syllabus** when `hasSyllabus` is true: open `syllabusUrl` in a browser/WebView if present, otherwise use **`GET /api/mobile/exams/:examId`** and show `instructions`.
+
+---
+
+### 8.2 Get exam details (schedule screen — per subject)
+
 **GET** `/api/mobile/exams/:examId`  
 **Auth:** Student / Parent / Teacher / Staff
 
-**Response**
+**No request body.**
+
+#### Success response (200)
 
 ```json
 {
   "success": true,
   "data": {
     "id": "EXAM_ID",
-    "name": "Half Yearly",
+    "title": "Final Term Exam",
+    "name": "Final Term Exam",
+    "displayDate": "11-02-2026",
+    "dateStart": "2026-02-11T00:00:00.000Z",
+    "dateEnd": "2026-02-11T00:00:00.000Z",
+    "status": "ONGOING",
+    "statusKey": "ongoing",
     "sessionId": "SESSION_ID",
     "sessionName": "2026-27",
     "classId": "CLASS_ID",
     "className": "Grade 7",
     "sectionId": "SECTION_ID",
     "sectionName": "A",
-    "instructions": "Reach 30 min early",
+    "instructions": "Reach 30 minutes early with admit card.",
+    "syllabusUrl": "https://school.example.org/syllabus/final-term.pdf",
+    "hasSyllabus": true,
     "subjects": [
-      { "subjectId": "SUB_MATH", "subjectName": "Mathematics", "maxMarks": 100, "passMarks": 35 }
+      {
+        "subjectId": "SUB_SCI",
+        "subject_name": "Science",
+        "subject_code": "SCI",
+        "exam_type": "Theory",
+        "total_marks": 100,
+        "pass_marks": 35,
+        "icon_identifier": "sci"
+      }
     ],
     "schedule": [
-      { "subjectId": "SUB_MATH", "subjectName": "Mathematics", "examDate": "2026-09-10T00:00:00.000Z", "startTime": "10:00", "endTime": "12:00" }
+      {
+        "subjectId": "SUB_SCI",
+        "subject_name": "Science",
+        "subject_code": "SCI",
+        "exam_type": "Theory",
+        "total_marks": 100,
+        "pass_marks": 35,
+        "date": "11-02-2026",
+        "examDate": "2026-02-11T00:00:00.000Z",
+        "start_time": "10:00 AM",
+        "end_time": "12:00 PM",
+        "time_range": "10:00 AM - 12:00 PM",
+        "icon_identifier": "sci"
+      }
     ]
   }
 }
 ```
-Returns exam meta + subjects + schedule + instructions.
+
+- **`exam_type`** comes from the subject’s **`type`** in academics (e.g. `Theory`, `Practical`); if empty, API returns **`Theory`**.  
+- **`total_marks`** / **`pass_marks`** on each schedule row are taken from the exam’s subject configuration.  
+- **`icon_identifier`** is a stable slug from `subject_code` or `subject_name` for local asset mapping (e.g. flask vs math icons).  
+- Times are exactly as stored on the exam (`startTime` / `endTime` strings).
 
 ### 8.3 Get exam marks
 **GET** `/api/mobile/exams/:examId/marks`  
@@ -649,13 +729,6 @@ Returns students filtered by exam scope:
       "section": "A"
     }
   ]
-}
-```
-
-**Student status update request (Teacher):**
-```json
-{
-  "status": "Approved"
 }
 ```
 
@@ -866,4 +939,133 @@ Error example:
   "message": "Leave is already reviewed and cannot be deleted"
 }
 ```
+
+---
+
+## 10) Homework (Mobile)
+
+Uses the same `Homework` collection as the web panel. **Submissions** are stored in `HomeworkSubmission` (one row per student per homework).  
+**Roles:** Student / Parent (list, detail, submit), **Teacher** (list own assignments, create, update, delete). **Staff** is not supported on these routes (403).
+
+Attachment types for assign/submit match study materials: PDF, Word, and common images. **Max upload size per file: 10 MB** (`uploadStudyMaterials` limit).
+
+Homework may include optional **`topic`** (e.g. chapter label: “Division”) and **`maxScore`** (points, e.g. `100`) for student detail headers. Set these from web or mobile teacher APIs; if omitted, `topic` is `""` and `maxScore` is `null`.
+
+### 10.1 List homework — Student / Parent
+**GET** `/api/mobile/homework?subjectId=&filter=`  
+**Auth:** Student or Parent
+
+**Query:**
+- `subjectId` (optional) — filter by subject (same as subject chips on “All Homework”)
+- `filter` (optional) — `pending` (not due yet, not submitted), `overdue` (past `dueDate`, not submitted), `submitted` or `completed` (has submission), or omit for all
+
+**Success (200):**
+- **`summary`** — counts for the top dashboard cards (computed **before** applying `filter`, but **after** `subjectId` so chips match the list scope): `pending`, `overdue`, `completed`
+- **`data`** — list items for the screen
+
+Each item includes:
+- **`status`**: `PENDING` | `OVERDUE` | `SUBMITTED` (badge)
+- **`statusLabel`**: `"Pending"` | `"Overdue"` | `"Submitted"`
+- **`subjectName`**, **`subjectCode`** — flattened from `subjectId`
+- **`topic`**, **`maxScore`** — optional metadata for titles / detail
+- **`previewImageUrl`** — first teacher attachment that is an image (JPG/PNG/WebP), for card thumbnails; `null` if none
+- **`resourceCount`** — number of teacher resources (files + optional link)
+- `hasSubmission`, `isOverdue`, `submission` (raw file paths on list), populated `classId` / `sectionId` / `subjectId`
+
+```json
+{
+  "success": true,
+  "summary": { "pending": 3, "overdue": 1, "completed": 1 },
+  "data": [
+    {
+      "_id": "HOMEWORK_ID",
+      "title": "Math Chapter 5 Exercises",
+      "description": "Complete exercises 1–20…",
+      "topic": "Division",
+      "maxScore": 100,
+      "date": "2026-03-28T00:00:00.000Z",
+      "dueDate": "2026-04-02T23:59:00.000Z",
+      "url": "",
+      "files": ["/uploads/123-notes.pdf"],
+      "downloadable": true,
+      "classId": { "_id": "CLASS_ID", "name": "Grade 7" },
+      "sectionId": { "_id": "SECTION_ID", "name": "A" },
+      "subjectId": { "_id": "SUBJECT_ID", "name": "Mathematics", "code": "MATH" },
+      "subjectName": "Mathematics",
+      "subjectCode": "MATH",
+      "createdBy": { "_id": "USER_ID", "name": "Teacher Name" },
+      "status": "PENDING",
+      "statusLabel": "Pending",
+      "hasSubmission": false,
+      "isOverdue": false,
+      "previewImageUrl": "/uploads/123-ref.jpg",
+      "resourceCount": 2,
+      "submission": null
+    }
+  ]
+}
+```
+
+### 10.2 List homework — Teacher (assignments I created)
+**GET** `/api/mobile/homework?classId=&sectionId=&subjectId=`  
+**Auth:** Teacher
+
+Optional filters match the web model (`ObjectId` strings).
+
+### 10.3 Homework detail
+**GET** `/api/mobile/homework/:id`  
+**Auth:** Student / Parent (must be in that class/section) or Teacher (must be creator)
+
+**Student / Parent** — detail screen payload:
+- Same meta as list: `title`, `description`, `dueDate`, `status` / `statusLabel`, `topic`, `maxScore`, `subjectName` / `subjectCode`, etc.
+- **`resources`**: teacher attachments for “Resources” list — each item has `type` (`file` | `link`), `url` (path or external link), `fileName`, `mimeType`, `kind` (`pdf` | `image` | `document` | `link` | `other`), `extension`, `sizeBytes` (from disk when available, else `null`), `downloadable`
+- **`submission`**: if present, `files` is the same enriched shape as `resources` (for “Your submission” previews)
+
+Use `dueDate` on the client for “Due date” + “Due time” (ISO string). If `maxScore` is `null`, hide or show “—” for points.
+
+**Teacher** — raw homework document with populated refs (unchanged).
+
+### 10.4 Teacher — Assign homework
+**POST** `/api/mobile/homework`  
+**Auth:** Teacher  
+**Content-Type:** `multipart/form-data`
+
+**Form fields** (same as web `POST /api/homework`):
+- `classId`, `sectionId`, `subjectId`, `title`, `dueDate` (required)
+- `topic`, `maxScore` (optional)
+- `description`, `date`, `url` (optional)
+- `downloadable`, `sendSmsToStudents`, `sendSmsToParents` (optional booleans as strings)
+- `files` — optional, multiple files (field name **`files`**)
+
+### 10.5 Teacher — Update / delete
+- **PUT** `/api/mobile/homework/:id` — `multipart/form-data`; new files append to `files` (same as web). Only the teacher who created the homework may edit.
+- **DELETE** `/api/mobile/homework/:id` — deletes the homework and all submissions for it.
+
+### 10.6 Student / Parent — Submit homework
+**POST** `/api/mobile/homework/:id/submit`  
+**Auth:** Student or Parent (child’s student record)  
+**Content-Type:** `multipart/form-data`
+
+**Form fields:**
+- `note` — optional text
+- `files` — optional multiple uploads
+
+At least one of **note** (non-empty) or **files** is required on first submit. Updating only `note` keeps existing uploaded files; uploading new **files** replaces the file list for that submission.
+
+**Success (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "SUBMISSION_ID",
+    "homeworkId": "HOMEWORK_ID",
+    "note": "Completed in notebook, photos attached",
+    "files": ["/uploads/1712345678-work.jpg"],
+    "submittedAt": "2026-03-29T12:00:00.000Z",
+    "updatedAt": "2026-03-29T12:00:00.000Z"
+  }
+}
+```
+
+**Base URL for files:** prepend your API host to paths like `/uploads/...` (same as other modules).
 

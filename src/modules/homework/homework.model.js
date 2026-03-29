@@ -34,6 +34,21 @@ const homeworkSchema = new mongoose.Schema(
       maxlength: 300,
     },
 
+    /** Optional chapter / unit label for student apps (e.g. "Division") */
+    topic: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+      default: "",
+    },
+
+    /** Optional max points (UI: "100 pts"); omit or null if not graded this way */
+    maxScore: {
+      type: Number,
+      min: 0,
+      max: 100000,
+    },
+
     description: {
       type: String,
       trim: true,

@@ -52,6 +52,9 @@ const examSchema = new mongoose.Schema(
       default: null,
     },
     instructions: { type: String, default: "" },
+
+    /** Optional URL for "View syllabus" on mobile (PDF link or school-hosted path) */
+    syllabusUrl: { type: String, trim: true, maxlength: 2000, default: "" },
     subjects: {
       type: [examSubjectSchema],
       validate: {

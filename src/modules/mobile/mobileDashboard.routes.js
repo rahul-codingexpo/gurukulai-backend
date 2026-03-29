@@ -14,12 +14,8 @@ import {
   teacherMarkStudentAttendance,
 } from "./mobileAttendance.controller.js";
 import { getMobileTimetable } from "./mobileTimetable.controller.js";
-import {
-  mobileListExams,
-  mobileGetExamById,
-  mobileGetExamMarks,
-  getExamStudents,
-} from "../exam/exam.controller.js";
+import { mobileGetExamMarks, getExamStudents } from "../exam/exam.controller.js";
+import { listMobileExams, getMobileExamById } from "./mobileExam.controller.js";
 import { getGalleryList, getGalleryById } from "../gallery/gallery.controller.js";
 import {
   applyMyLeaveMobile,
@@ -41,6 +37,15 @@ import {
   listPendingStaffLeavesMobile,
   updateStaffLeaveStatusMobile,
 } from "./mobileLeaves.controller.js";
+import { uploadStudyMaterials } from "../../middleware/upload.middleware.js";
+import {
+  listMobileHomework,
+  getMobileHomeworkById,
+  createMobileHomework,
+  updateMobileHomework,
+  deleteMobileHomework,
+  submitMobileHomework,
+} from "./mobileHomework.controller.js";
 
 const router = express.Router();
 const mobileOnly = (req, res, next) => {
@@ -109,14 +114,40 @@ router.post(
 router.get("/timetable", protect, mobileOnly, getMobileTimetable);
 
 // -------- Exams / Admit / Marksheet (Mobile GET) --------
-router.get("/exams", protect, mobileOnly, mobileListExams);
-router.get("/exams/:examId", protect, mobileOnly, mobileGetExamById);
+router.get("/exams", protect, mobileOnly, listMobileExams);
+router.get("/exams/:examId", protect, mobileOnly, getMobileExamById);
 router.get("/exams/:examId/students", protect, mobileOnly, getExamStudents);
 router.get("/exams/:examId/marks", protect, mobileOnly, mobileGetExamMarks);
 
 // -------- Gallery (Mobile GET) --------
 router.get("/gallery", protect, mobileOnly, getGalleryList);
 router.get("/gallery/:id", protect, mobileOnly, getGalleryById);
+
+// -------- Homework (Mobile) --------
+router.get("/homework", protect, mobileOnly, listMobileHomework);
+router.post(
+  "/homework",
+  protect,
+  mobileOnly,
+  uploadStudyMaterials.fields([{ name: "files", maxCount: 10 }]),
+  createMobileHomework,
+);
+router.post(
+  "/homework/:id/submit",
+  protect,
+  mobileOnly,
+  uploadStudyMaterials.fields([{ name: "files", maxCount: 10 }]),
+  submitMobileHomework,
+);
+router.get("/homework/:id", protect, mobileOnly, getMobileHomeworkById);
+router.put(
+  "/homework/:id",
+  protect,
+  mobileOnly,
+  uploadStudyMaterials.fields([{ name: "files", maxCount: 10 }]),
+  updateMobileHomework,
+);
+router.delete("/homework/:id", protect, mobileOnly, deleteMobileHomework);
 
 // -------- Leaves (Mobile clean APIs) --------
 router.post("/leaves/me/apply", protect, mobileOnly, applyMyLeaveMobile);
