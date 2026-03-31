@@ -734,7 +734,140 @@ Returns students filtered by exam scope:
 
 ---
 
-## 9) Gallery (Web + Mobile)
+## 9) MCQ Quizzes (Mobile – Student/Parent)
+
+Mobile quiz APIs are read-only and per-play only – they **do not** store quiz attempts in DB (score is computed on the fly from questions).
+
+### 9.1 List quizzes for logged-in student/parent
+
+**GET** `/api/mobile/quiz/quizzes`  
+**Auth:** Student / Parent
+
+Uses the linked student’s `schoolId` and `className` to discover available quizzes.
+
+**Optional query params:**
+- `subject` — filter by quiz subject (e.g. `"Mathematics"`)
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": {
+        "quizTitle": "Class 8 Algebra Practice - Set 1",
+        "subject": "Mathematics"
+      },
+      "quizTitle": "Class 8 Algebra Practice - Set 1",
+      "subject": "Mathematics",
+      "class": "Class 8",
+      "questionCount": 15,
+      "totalMarks": 15
+    }
+  ]
+}
+```
+
+---
+
+### 9.2 Get questions for a quiz (play screen)
+
+**GET** `/api/mobile/quiz/quizzes/questions?quizTitle=&subject=`  
+**Auth:** Student / Parent
+
+**Required query params:**
+- `quizTitle` — quiz title exactly as created from web (e.g. `"Class 8 Algebra Practice - Set 1"`)
+- `subject` — quiz subject (e.g. `"Mathematics"`)
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "quizTitle": "Class 8 Algebra Practice - Set 1",
+    "subject": "Mathematics",
+    "class": "Class 8",
+    "totalQuestions": 15,
+    "totalMarks": 15,
+    "questions": [
+      {
+        "id": "QUESTION_ID",
+        "questionText": "What is 2x + 3x?",
+        "options": {
+          "A": "3x",
+          "B": "5x",
+          "C": "6x",
+          "D": "2x²"
+        },
+        "marks": 1
+      }
+    ]
+  }
+}
+```
+
+> **Note:** Correct answers are **not** returned on this endpoint – only options and marks per question to render the quiz UI.
+
+---
+
+### 9.3 Submit quiz answers (compute score)
+
+**POST** `/api/mobile/quiz/quizzes/submit`  
+**Auth:** Student / Parent  
+**Content-Type:** `application/json`
+
+**Request body:**
+```json
+{
+  "quizTitle": "Class 8 Algebra Practice - Set 1",
+  "subject": "Mathematics",
+  "answers": [
+    { "questionId": "QUESTION_ID_1", "selectedOption": "B" },
+    { "questionId": "QUESTION_ID_2", "selectedOption": "C" }
+  ]
+}
+```
+
+- `selectedOption` must be one of `"A"`, `"B"`, `"C"`, `"D"` (case-insensitive).  
+- Any question without a matching entry in `answers` is treated as **not attempted**.
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "quizTitle": "Class 8 Algebra Practice - Set 1",
+    "subject": "Mathematics",
+    "class": "Class 8",
+    "totalQuestions": 15,
+    "totalMarks": 15,
+    "obtainedMarks": 13,
+    "percentage": 87,
+    "details": [
+      {
+        "questionId": "QUESTION_ID_1",
+        "isCorrect": true,
+        "correctOption": "B",
+        "selectedOption": "B",
+        "marks": 1,
+        "earnedMarks": 1
+      },
+      {
+        "questionId": "QUESTION_ID_2",
+        "isCorrect": false,
+        "correctOption": "C",
+        "selectedOption": "B",
+        "marks": 1,
+        "earnedMarks": 0
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 10) Gallery (Web + Mobile)
 
 ### 9.1 Upload gallery media (Web admin panel)
 **POST** `/api/gallery/upload`  
@@ -942,7 +1075,7 @@ Error example:
 
 ---
 
-## 10) Homework (Mobile)
+## 11) Homework (Mobile)
 
 Uses the same `Homework` collection as the web panel. **Submissions** are stored in `HomeworkSubmission` (one row per student per homework).  
 **Roles:** Student / Parent (list, detail, submit), **Teacher** (list own assignments, create, update, delete). **Staff** is not supported on these routes (403).

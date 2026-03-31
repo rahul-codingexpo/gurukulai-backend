@@ -16,6 +16,7 @@ import {
 import { getMobileTimetable } from "./mobileTimetable.controller.js";
 import { mobileGetExamMarks, getExamStudents } from "../exam/exam.controller.js";
 import { listMobileExams, getMobileExamById } from "./mobileExam.controller.js";
+import { mobileQuizRoutes } from "../quiz/quizQuestion.routes.js";
 import { getGalleryList, getGalleryById } from "../gallery/gallery.controller.js";
 import {
   applyMyLeaveMobile,
@@ -118,6 +119,9 @@ router.get("/exams", protect, mobileOnly, listMobileExams);
 router.get("/exams/:examId", protect, mobileOnly, getMobileExamById);
 router.get("/exams/:examId/students", protect, mobileOnly, getExamStudents);
 router.get("/exams/:examId/marks", protect, mobileOnly, mobileGetExamMarks);
+
+// -------- MCQ Quizzes (Mobile) --------
+router.use("/quiz", protect, mobileOnly, mobileQuizRoutes);
 
 // -------- Gallery (Mobile GET) --------
 router.get("/gallery", protect, mobileOnly, getGalleryList);

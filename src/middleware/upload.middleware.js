@@ -77,4 +77,39 @@ export const uploadExcel = multer({
   fileFilter: excelFileFilter,
 });
 
+// Quiz bulk upload: allow CSV, JSON, and Excel files
+const quizFileFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname || "").toLowerCase();
+  const mime = file.mimetype;
+
+  const isExcel =
+    ext === ".xlsx" ||
+    ext === ".xls" ||
+    mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    mime === "application/vnd.ms-excel";
+
+  const isCsv =
+    ext === ".csv" ||
+    mime === "text/csv" ||
+    mime === "application/vnd.ms-excel";
+
+  const isJson =
+    ext === ".json" || mime === "application/json" || mime === "text/json";
+
+  if (isExcel || isCsv || isJson) {
+    cb(null, true);
+  } else {
+    cb(
+      new Error("Only .csv, .json, .xlsx or .xls files are allowed"),
+      false,
+    );
+  }
+};
+
+export const uploadQuizFile = multer({
+  storage,
+  fileFilter: quizFileFilter,
+});
+
 export default upload;
+
