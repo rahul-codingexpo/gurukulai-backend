@@ -111,7 +111,7 @@ export const getStaffAttendanceByDate = async (req, res, next) => {
     let schoolId = resolveSchoolId(req);
 
     // Staff/Teacher/Principal viewing own attendance
-    if (["Staff", "Teacher", "Principal"].includes(roleName)) {
+    if (["Staff", "Teacher"].includes(roleName)) {
       const staff = await Staff.findOne({ userId: req.user._id }).select(
         "_id schoolId"
       );
