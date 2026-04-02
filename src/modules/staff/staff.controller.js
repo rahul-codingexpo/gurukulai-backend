@@ -11,6 +11,48 @@ const resolveSchoolId = (req) => {
   return req.user.schoolId;
 };
 
+const allowedDocumentMimeTypes = new Set([
+  "application/pdf",
+  "application/msword", // .doc
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+]);
+
+const getUploadedFile = (files, fieldName) => files?.[fieldName]?.[0] ?? null;
+
+const uploadsUrlFromFile = (file) =>
+  file?.filename ? `/uploads/${file.filename}` : undefined;
+
+const validateCreatePayload = (payload) => {
+  const { name, designation, salary, joiningDate, status } = payload;
+
+  if (!name || String(name).trim() === "") {
+    return "name is required";
+  }
+
+  if (
+    !designation ||
+    !["Principal", "Teacher", "Staff"].includes(String(designation).trim())
+  ) {
+    return "designation must be Principal, Teacher, or Staff";
+  }
+
+  const salaryNum = Number(salary);
+  if (salary === undefined || salary === null || salary === "" || Number.isNaN(salaryNum)) {
+    return "salary is required and must be a number";
+  }
+  if (salaryNum < 0) return "salary must be >= 0";
+
+  if (!joiningDate) return "joiningDate is required";
+  const jd = new Date(joiningDate);
+  if (Number.isNaN(jd.getTime())) return "joiningDate must be a valid date";
+
+  if (!status || !["ACTIVE", "INACTIVE"].includes(String(status).trim())) {
+    return "status must be ACTIVE or INACTIVE";
+  }
+
+  return null;
+};
+
 /**
  * Create Staff (Teacher / Principal / Staff)
  * Only Admin
@@ -99,6 +141,68 @@ export const createStaff = async (req, res, next) => {
 
     const schoolId = resolveSchoolId(req); // SuperAdmin can target a school
 
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message: "School context missing",
+      });
+    }
+
+    const payloadError = validateCreatePayload({
+      name,
+      designation,
+      salary,
+      joiningDate,
+      status,
+    });
+    if (payloadError) {
+      return res.status(400).json({
+        success: false,
+        message: payloadError,
+      });
+    }
+
+    // Required document fields
+    const requiredDocs = [
+      "photo",
+      "aadharDocument",
+      "panDocument",
+      "experienceDocument",
+    ];
+
+    const missingDocs = requiredDocs.filter(
+      (f) => !getUploadedFile(req.files, f),
+    );
+    if (missingDocs.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required document(s): ${missingDocs.join(", ")}`,
+      });
+    }
+
+    // Validate mime types
+    const photoFile = getUploadedFile(req.files, "photo");
+    if (!photoFile?.mimetype?.startsWith("image/")) {
+      return res.status(400).json({
+        success: false,
+        message: "photo must be an image file",
+      });
+    }
+
+    for (const docField of ["aadharDocument", "panDocument", "experienceDocument"]) {
+      const f = getUploadedFile(req.files, docField);
+      const ok =
+        allowedDocumentMimeTypes.has(f?.mimetype) ||
+        // allow images if frontend uploads images for docs
+        f?.mimetype?.startsWith("image/");
+      if (!ok) {
+        return res.status(400).json({
+          success: false,
+          message: `${docField} must be a PDF/DOC/DOCX (or image) file`,
+        });
+      }
+    }
+
     let user = null;
 
     if (username && password) {
@@ -124,16 +228,31 @@ export const createStaff = async (req, res, next) => {
       });
     }
 
+    const photoUrl = uploadsUrlFromFile(getUploadedFile(req.files, "photo"));
+    const aadharDocumentUrl = uploadsUrlFromFile(
+      getUploadedFile(req.files, "aadharDocument"),
+    );
+    const panDocumentUrl = uploadsUrlFromFile(
+      getUploadedFile(req.files, "panDocument"),
+    );
+    const experienceDocumentUrl = uploadsUrlFromFile(
+      getUploadedFile(req.files, "experienceDocument"),
+    );
+
     const staff = await Staff.create({
       name,
       email,
       phone,
-      salary,
-      designation,
-      joiningDate,
-      status,
+      salary: Number(salary),
+      designation: String(designation).trim(),
+      joiningDate: new Date(joiningDate),
+      status: String(status).trim(),
       userId: user?._id,
       schoolId,
+      photoUrl,
+      aadharDocumentUrl,
+      panDocumentUrl,
+      experienceDocumentUrl,
     });
 
     res.status(201).json({
@@ -191,7 +310,38 @@ export const getStaff = async (req, res, next) => {
 
 export const updateStaff = async (req, res, next) => {
   try {
-    const staff = await Staff.findByIdAndUpdate(req.params.id, req.body, {
+    const updatePayload = { ...req.body };
+
+    if (updatePayload.salary !== undefined) {
+      const salaryNum = Number(updatePayload.salary);
+      updatePayload.salary = Number.isNaN(salaryNum) ? updatePayload.salary : salaryNum;
+    }
+
+    if (updatePayload.joiningDate !== undefined) {
+      const jd = new Date(updatePayload.joiningDate);
+      if (!Number.isNaN(jd.getTime())) updatePayload.joiningDate = jd;
+    }
+
+    if (req.files?.photo?.[0]) {
+      updatePayload.photoUrl = uploadsUrlFromFile(req.files.photo[0]);
+    }
+    if (req.files?.aadharDocument?.[0]) {
+      updatePayload.aadharDocumentUrl = uploadsUrlFromFile(
+        req.files.aadharDocument[0],
+      );
+    }
+    if (req.files?.panDocument?.[0]) {
+      updatePayload.panDocumentUrl = uploadsUrlFromFile(
+        req.files.panDocument[0],
+      );
+    }
+    if (req.files?.experienceDocument?.[0]) {
+      updatePayload.experienceDocumentUrl = uploadsUrlFromFile(
+        req.files.experienceDocument[0],
+      );
+    }
+
+    const staff = await Staff.findByIdAndUpdate(req.params.id, updatePayload, {
       new: true,
     });
 

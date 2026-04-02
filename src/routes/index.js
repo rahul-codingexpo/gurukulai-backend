@@ -24,6 +24,7 @@ import mobileRoutes from "../modules/mobile/mobileDashboard.routes.js";
 import examRoutes from "../modules/exam/exam.routes.js";
 import { quizQuestionRoutes } from "../modules/quiz/quizQuestion.routes.js";
 import galleryRoutes from "../modules/gallery/gallery.routes.js";
+import inventoryExpenseRoutes from "../modules/inventory/inventoryExpense.routes.js";
 const router = express.Router();
 
 router.use("/auth", authRoutes);
@@ -42,6 +43,7 @@ router.use("/timetable", timetableRoutes);
 router.use("/class-timetable", classTimetableRoutes);
 router.use("/academic/exams", examRoutes);
 router.use("/quiz-questions", quizQuestionRoutes);
+router.use("/inventory", inventoryExpenseRoutes);
 router.use("/gallery", galleryRoutes);
 router.use("/attendance", attendanceRoutes);
 router.use("/leaves", leaveRoutes);

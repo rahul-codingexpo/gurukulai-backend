@@ -111,5 +111,33 @@ export const uploadQuizFile = multer({
   fileFilter: quizFileFilter,
 });
 
+// Staff documents for Add Staff form (multipart/form-data)
+const staffDocumentsFileFilter = (req, file, cb) => {
+  const allowed = [
+    // photo
+    "image/png",
+    "image/jpg",
+    "image/jpeg",
+    "image/webp",
+    // documents
+    "application/pdf",
+    "application/msword", // .doc
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+  ];
+
+  if (allowed.includes(file.mimetype)) return cb(null, true);
+
+  // allow images for documents too (if frontend sends images for these fields)
+  if (file.mimetype && file.mimetype.startsWith("image/")) return cb(null, true);
+
+  return cb(new Error("Invalid file type for staff documents"), false);
+};
+
+export const uploadStaffDocuments = multer({
+  storage,
+  fileFilter: staffDocumentsFileFilter,
+  limits: { fileSize: TEN_MB },
+});
+
 export default upload;
 

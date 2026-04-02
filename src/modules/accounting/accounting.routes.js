@@ -31,6 +31,8 @@ import {
   rejectWalletPayment,
 } from "./walletApproval.controller.js";
 
+import pastFeeDataRoutes from "./pastFees/pastFeeData.routes.js";
+
 const router = express.Router();
 
 // ---------- Fee Types ----------
@@ -177,5 +179,8 @@ router.put(
   injectSchool,
   rejectWalletPayment
 );
+
+// ---------- Past Fee Data (Old Dues Archive) ----------
+router.use(pastFeeDataRoutes);
 
 export default router;

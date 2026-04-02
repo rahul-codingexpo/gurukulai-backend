@@ -1085,7 +1085,7 @@ Attachment types for assign/submit match study materials: PDF, Word, and common 
 Homework may include optional **`topic`** (e.g. chapter label: “Division”) and **`maxScore`** (points, e.g. `100`) for student detail headers. Set these from web or mobile teacher APIs; if omitted, `topic` is `""` and `maxScore` is `null`.
 
 ### 10.1 List homework — Student / Parent
-**GET** `/api/mobile/homework?subjectId=&filter=`  
+**GET** `/api/mobile/homework?subjectId=&filter=`
 **Auth:** Student or Parent
 
 **Query:**
@@ -1175,7 +1175,7 @@ Use `dueDate` on the client for “Due date” + “Due time” (ISO string). If
 - **DELETE** `/api/mobile/homework/:id` — deletes the homework and all submissions for it.
 
 ### 10.6 Student / Parent — Submit homework
-**POST** `/api/mobile/homework/:id/submit`  
+**POST** `/api/mobile/homework/:id/submit`
 **Auth:** Student or Parent (child’s student record)  
 **Content-Type:** `multipart/form-data`
 

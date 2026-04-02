@@ -47,6 +47,12 @@ const staffSchema = new mongoose.Schema(
       ref: "School",
       required: true,
     },
+
+    // Optional staff documents (stored as `/uploads/<filename>` paths)
+    photoUrl: { type: String, default: undefined },
+    aadharDocumentUrl: { type: String, default: undefined },
+    panDocumentUrl: { type: String, default: undefined },
+    experienceDocumentUrl: { type: String, default: undefined },
   },
   { timestamps: true },
 );
