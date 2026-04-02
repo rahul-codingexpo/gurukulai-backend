@@ -115,7 +115,7 @@ import Student from "./student.model.js";
 import User from "../user/user.model.js";
 import Role from "../auth/role.model.js";
 import bcrypt from "bcryptjs";
-import * as XLSX from "xlsx";
+import XLSX from "xlsx";
 import fs from "fs";
 
 const buildPlaceholderEmail = (namespace, uniqueValue) => {
