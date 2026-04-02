@@ -57,19 +57,20 @@ export const uploadStudyMaterials = multer({
   limits: { fileSize: TEN_MB },
 });
 
-// Bulk student import: allow Excel files
+// Bulk student import: allow Excel + CSV files
 const excelFileFilter = (req, file, cb) => {
   const allowedMimes = [
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
     "application/vnd.ms-excel", // .xls
+    "text/csv", // .csv
   ];
   const ext = path.extname(file.originalname || "").toLowerCase();
 
-  const allowedExt = [".xlsx", ".xls"].includes(ext);
+  const allowedExt = [".xlsx", ".xls", ".csv"].includes(ext);
   const allowedMime = allowedMimes.includes(file.mimetype);
 
   if (allowedExt || allowedMime) cb(null, true);
-  else cb(new Error("Only .xlsx or .xls Excel files are allowed"), false);
+  else cb(new Error("Only .xlsx, .xls or .csv files are allowed"), false);
 };
 
 export const uploadExcel = multer({

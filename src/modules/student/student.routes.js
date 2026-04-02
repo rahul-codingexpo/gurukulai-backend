@@ -15,7 +15,6 @@
 // );
 
 // export default router;
-
 //==============updated code================
 
 import express from "express";
@@ -49,7 +48,7 @@ router.post(
   createAdmission,
 );
 
-// Bulk student admission via Excel (.xlsx/.xls)
+// Bulk student admission via Excel/CSV (.xlsx/.xls/.csv)
 // multipart/form-data:
 // - file field: `excelFile`
 // - optional JSON fields: `studentLogin`, `parentLogin` (stringified JSON in frontend)

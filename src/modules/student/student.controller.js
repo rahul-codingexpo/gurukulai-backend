@@ -346,7 +346,7 @@ export const createAdmission = async (req, res, next) => {
 };
 
 /**
- * Bulk student admission via Excel (.xlsx/.xls)
+ * Bulk student admission via Excel/CSV (.xlsx/.xls/.csv)
  *
  * Expected excel columns (header row required):
  * - name, gender, dob, admissionNumber, rollNumber, className, section, admissionDate
@@ -358,7 +358,7 @@ export const createAdmission = async (req, res, next) => {
  * - motherEmail (not used for login currently; included for future)
  *
  * Request (multipart/form-data):
- * - excelFile: Excel file
+ * - excelFile: Excel/CSV file
  * - studentLogin: JSON string (e.g. {"type":"NEW_USER","password":"123456"}) [optional]
  * - parentLogin: JSON string (e.g. {"type":"NEW_USER","password":"123456"}) [optional]
  */
@@ -379,7 +379,7 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: "Excel file is required (.xlsx or .xls) under field `excelFile`",
+        message: "File is required (.xlsx, .xls, or .csv) under field `excelFile`",
       });
     }
 
