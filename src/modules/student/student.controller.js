@@ -161,6 +161,7 @@ export const createAdmission = async (req, res, next) => {
     const feeStructure = parseJSON(req.body.feeStructure, []);
     const studentLogin = parseJSON(req.body.studentLogin, {});
     const parentLogin = parseJSON(req.body.parentLogin, {});
+    const addressPayload = parseJSON(req.body.address, null);
 
     const {
       name,
@@ -172,7 +173,27 @@ export const createAdmission = async (req, res, next) => {
       className,
       section,
       admissionDate,
+      currentAddress,
+      permanentAddress,
     } = req.body;
+
+    // Store only a single address string (not current/permanent split)
+    let addressValue = "";
+    if (typeof addressPayload === "string") {
+      addressValue = addressPayload;
+    } else if (addressPayload && typeof addressPayload === "object") {
+      addressValue =
+        addressPayload.address ??
+        addressPayload.current ??
+        addressPayload.currentAddress ??
+        addressPayload.permanent ??
+        addressPayload.permanentAddress ??
+        "";
+    } else {
+      addressValue = currentAddress ?? permanentAddress ?? "";
+    }
+
+    const address = String(addressValue ?? "").trim();
 
     /* CHECK DUPLICATE ADMISSION */
 
@@ -195,11 +216,13 @@ export const createAdmission = async (req, res, next) => {
       name,
       gender,
       dob,
+      phone,
       admissionNumber,
       rollNumber,
       className,
       section,
       admissionDate,
+      address,
       parents,
       previousSchool,
       documents: {
@@ -356,6 +379,7 @@ export const createAdmission = async (req, res, next) => {
  * - studentPhone (if you want student login via phone)
  * - fatherEmail (for parent user email; placeholder will be used if missing)
  * - motherEmail (not used for login currently; included for future)
+ * - currentAddress, permanentAddress (student residence)
  *
  * Request (multipart/form-data):
  * - excelFile: Excel/CSV file
@@ -540,6 +564,24 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
 
         const studentPhone = toMaybeStr(pick(row, ["studentPhone", "student phone", "Student Phone", "phone"]));
 
+        const currentAddr = toMaybeStr(
+          pick(row, [
+            "currentAddress",
+            "Current Address",
+            "current address",
+            "address",
+            "Address",
+          ]),
+        );
+        const permanentAddr = toMaybeStr(
+          pick(row, [
+            "permanentAddress",
+            "Permanent Address",
+            "permanent address",
+          ]),
+        );
+        const addressVal = currentAddr || permanentAddr || "";
+
         // Create Student
         const student = await Student.create({
           schoolId,
@@ -551,6 +593,7 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           className: toStr(className),
           section: toStr(section),
           admissionDate,
+          address: addressVal,
           parents: {
             father: {
               name: toStr(fatherName),
@@ -714,8 +757,10 @@ export const updateStudent = async (req, res, next) => {
     const parents = parseJSON(req.body.parents);
     const previousSchool = parseJSON(req.body.previousSchool);
     const feeStructure = parseJSON(req.body.feeStructure);
+    const addressPayload = parseJSON(req.body.address, null);
 
-    const { name, gender, dob, rollNumber, className, section } = req.body;
+    const { name, gender, dob, rollNumber, className, section, currentAddress, permanentAddress } =
+      req.body;
 
     if (name) student.name = name;
     if (gender) student.gender = gender;
@@ -726,6 +771,26 @@ export const updateStudent = async (req, res, next) => {
     if (parents) student.parents = parents;
     if (previousSchool) student.previousSchool = previousSchool;
     if (feeStructure) student.feeStructure = feeStructure;
+
+    // Store only one address string
+    if (addressPayload !== null && addressPayload !== undefined) {
+      let addrVal = "";
+      if (typeof addressPayload === "string") {
+        addrVal = addressPayload;
+      } else if (typeof addressPayload === "object") {
+        addrVal =
+          addressPayload.address ??
+          addressPayload.current ??
+          addressPayload.currentAddress ??
+          addressPayload.permanent ??
+          addressPayload.permanentAddress ??
+          "";
+      }
+      student.address = String(addrVal ?? "").trim();
+    } else if (currentAddress !== undefined || permanentAddress !== undefined) {
+      const addrVal = currentAddress ?? permanentAddress ?? "";
+      student.address = String(addrVal).trim();
+    }
 
     await student.save();
 

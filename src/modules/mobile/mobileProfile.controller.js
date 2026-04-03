@@ -82,8 +82,8 @@ export const getMobileProfile = async (req, res, next) => {
             phone: student.phone || req.user.phone || "",
             gender: student.gender || "",
             bloodGroup: "", // not stored in schema yet
-            currentAddress: "", // not stored in schema yet
-            permanentAddress: "", // not stored in schema yet
+            currentAddress: student.address || "",
+            permanentAddress: "",
           },
           emergencyContact: {
             contactName: fatherName,

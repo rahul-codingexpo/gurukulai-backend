@@ -13,6 +13,9 @@ const studentSchema = new mongoose.Schema(
     dob: Date,
     phone: String,
 
+    /** Student address/residence (optional) */
+    address: { type: String, default: "" },
+
     admissionNumber: {
       type: String,
       required: true,
