@@ -133,6 +133,26 @@ const parseJSON = (data, defaultValue) => {
   return data;
 };
 
+// `address` is expected to be a plain string, but some clients may still send JSON.
+// We only attempt JSON.parse when it looks like an object/array; otherwise keep it as raw text.
+const safeParseAddressPayload = (value) => {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+  if (typeof value === "object") return value;
+  return String(value);
+};
+
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
   if (roleName === "SuperAdmin") {
@@ -161,7 +181,7 @@ export const createAdmission = async (req, res, next) => {
     const feeStructure = parseJSON(req.body.feeStructure, []);
     const studentLogin = parseJSON(req.body.studentLogin, {});
     const parentLogin = parseJSON(req.body.parentLogin, {});
-    const addressPayload = parseJSON(req.body.address, null);
+    const addressPayload = safeParseAddressPayload(req.body.address);
 
     const {
       name,
@@ -757,10 +777,29 @@ export const updateStudent = async (req, res, next) => {
     const parents = parseJSON(req.body.parents);
     const previousSchool = parseJSON(req.body.previousSchool);
     const feeStructure = parseJSON(req.body.feeStructure);
-    const addressPayload = parseJSON(req.body.address, null);
+    const addressPayload = safeParseAddressPayload(req.body.address);
+    const studentLogin = parseJSON(req.body.studentLogin, null);
+    const parentLogin = parseJSON(req.body.parentLogin, null);
 
-    const { name, gender, dob, rollNumber, className, section, currentAddress, permanentAddress } =
-      req.body;
+    const {
+      name,
+      gender,
+      dob,
+      rollNumber,
+      className,
+      section,
+      currentAddress,
+      permanentAddress,
+      phone,
+      admissionNumber,
+      admissionDate,
+    } = req.body;
+
+    // Phone fallback: if phone not provided, allow studentLogin.phone to fill it.
+    const effectivePhone =
+      phone !== undefined && phone !== null && String(phone).trim()
+        ? phone
+        : studentLogin?.phone ?? undefined;
 
     if (name) student.name = name;
     if (gender) student.gender = gender;
@@ -790,6 +829,99 @@ export const updateStudent = async (req, res, next) => {
     } else if (currentAddress !== undefined || permanentAddress !== undefined) {
       const addrVal = currentAddress ?? permanentAddress ?? "";
       student.address = String(addrVal).trim();
+    }
+
+    // Persist additional editable fields (used by admission edit UI)
+    if (effectivePhone !== undefined) {
+      student.phone =
+        effectivePhone === null ? undefined : String(effectivePhone).trim();
+    }
+
+    if (admissionNumber !== undefined) {
+      const newAdmissionNumber = String(admissionNumber).trim();
+
+      if (!newAdmissionNumber) {
+        return res.status(400).json({
+          success: false,
+          message: "admissionNumber cannot be empty",
+        });
+      }
+
+      if (newAdmissionNumber !== student.admissionNumber) {
+        const duplicate = await Student.findOne({
+          schoolId,
+          admissionNumber: newAdmissionNumber,
+          _id: { $ne: student._id },
+        });
+
+        if (duplicate) {
+          return res.status(400).json({
+            success: false,
+            message: "Admission number already exists",
+          });
+        }
+      }
+
+      student.admissionNumber = newAdmissionNumber;
+    }
+
+    if (admissionDate !== undefined) {
+      const parsed = new Date(admissionDate);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "admissionDate must be a valid date",
+        });
+      }
+      student.admissionDate = parsed;
+    }
+
+    // Persist login references (no credential/user creation in PUT).
+    if (studentLogin && typeof studentLogin === "object") {
+      student.studentLogin = student.studentLogin || {};
+      if (studentLogin.enabled !== undefined) {
+        student.studentLogin.enabled = Boolean(studentLogin.enabled);
+      }
+      if (studentLogin.userId) {
+        student.studentLogin.userId = studentLogin.userId;
+      }
+    }
+    if (parentLogin && typeof parentLogin === "object") {
+      student.parentLogin = student.parentLogin || {};
+      if (parentLogin.enabled !== undefined) {
+        student.parentLogin.enabled = Boolean(parentLogin.enabled);
+      }
+      if (parentLogin.userId) {
+        student.parentLogin.userId = parentLogin.userId;
+      }
+    }
+
+    // Persist uploaded documents if they were provided in multipart/form-data.
+    // (PUT route already applies multer fields for these keys.)
+    const fileToUploadPath = (f) => {
+      if (!f) return undefined;
+      if (f.filename) return `/uploads/${f.filename}`;
+      if (f.path) {
+        const parts = String(f.path).split(/[/\\]/g);
+        return parts.length ? `/uploads/${parts[parts.length - 1]}` : f.path;
+      }
+      return undefined;
+    };
+    if (req.files?.studentPhoto?.[0]) {
+      student.documents = student.documents || {};
+      student.documents.studentPhoto = fileToUploadPath(req.files.studentPhoto[0]);
+    }
+    if (req.files?.fatherIdProof?.[0]) {
+      student.documents = student.documents || {};
+      student.documents.fatherIdProof = fileToUploadPath(req.files.fatherIdProof[0]);
+    }
+    if (req.files?.motherIdProof?.[0]) {
+      student.documents = student.documents || {};
+      student.documents.motherIdProof = fileToUploadPath(req.files.motherIdProof[0]);
+    }
+    if (req.files?.parentSignature?.[0]) {
+      student.documents = student.documents || {};
+      student.documents.parentSignature = fileToUploadPath(req.files.parentSignature[0]);
     }
 
     await student.save();
