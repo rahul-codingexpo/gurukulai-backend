@@ -59,6 +59,13 @@ const classTimetableSchema = new mongoose.Schema(
       default: "",
     },
 
+    /** Optional video/meet link for mobile “Join class” when using ClassTimetable rows */
+    joinLink: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     teacherId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

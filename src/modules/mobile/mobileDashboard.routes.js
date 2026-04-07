@@ -13,7 +13,10 @@ import {
   getTeacherStudentsForMarking,
   teacherMarkStudentAttendance,
 } from "./mobileAttendance.controller.js";
-import { getMobileTimetable } from "./mobileTimetable.controller.js";
+import {
+  getMobileTimetable,
+  getMobileTimetableCourses,
+} from "./mobileTimetable.controller.js";
 import { mobileGetExamMarks, getExamStudents } from "../exam/exam.controller.js";
 import { listMobileExams, getMobileExamById } from "./mobileExam.controller.js";
 import { mobileQuizRoutes } from "../quiz/quizQuestion.routes.js";
@@ -109,9 +112,11 @@ router.post(
 );
 
 // -------- Timetable (Mobile) --------
+// Aggregated course cards (week): register before /timetable so "courses" is not shadowed
+router.get("/timetable/courses", protect, mobileOnly, getMobileTimetableCourses);
 // Student/Parent: own class timetable by day
 // Teacher: own timetable by day
-// Admin/Principal: optional classId/sectionId/teacherId filters
+// Staff: optional classId/sectionId/teacherId filters
 router.get("/timetable", protect, mobileOnly, getMobileTimetable);
 
 // -------- Exams / Admit / Marksheet (Mobile GET) --------

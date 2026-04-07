@@ -6,6 +6,17 @@
 This document is focused on **mobile app usage** (Student/Parent/Teacher login → Dashboard).
 All `/api/mobile/*` endpoints are restricted to these roles only: `Student`, `Parent`, `Teacher`, `Staff`.
 
+### Default password (Student/Parent)
+When Student/Parent accounts are created during admission (or bulk admission), the backend can auto-set a default password.
+
+- **Default values**:
+  - Student: `12345`
+  - Parent: `123456`
+- **Override via env**:
+  - `DEFAULT_STUDENT_PASSWORD`
+  - `DEFAULT_PARENT_PASSWORD`
+  - or shared `DEFAULT_USER_PASSWORD` (fallback for both)
+
 ---
 
 ## 1) Auth (Mobile)
@@ -503,6 +514,52 @@ Timetable UI with day tabs (`Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`) can call o
   }
 }
 ```
+
+### 6.2 Get timetable as course cards (week aggregate)
+**GET** `/api/mobile/timetable/courses`  
+**Auth:** Required  
+
+Same role and filter rules as **6.1** (Student/Parent: own class/section; Teacher: own slots; Staff: optional `classId`, `sectionId`, `teacherId`). Uses **Monday–Saturday** only.  
+
+If the school uses **period-based** `Timetable` rows for the week, those are used; otherwise **ClassTimetable** rows are used (same as the day endpoint). For **ClassTimetable**, optional `joinLink` on each row is exposed for a “Join class” button.
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "courses": [
+      {
+        "title": "Mathematics - Grade 7",
+        "subtitle": "Section A",
+        "subject": "Mathematics",
+        "subjectCode": "MATH",
+        "className": "Grade 7",
+        "section": "A",
+        "instructorName": "Ramesh Kumar",
+        "scheduleSummary": "Mon, Wed, Fri - 9:00 AM",
+        "days": ["Monday", "Wednesday", "Friday"],
+        "shortDays": ["Mon", "Wed", "Fri"],
+        "startTime": "09:00",
+        "endTime": "10:00",
+        "durationMinutes": 60,
+        "durationLabel": "1 hour",
+        "roomNumber": "R-12",
+        "totalStudents": 32,
+        "isLive": false,
+        "nextClass": "Tomorrow at 9:00 AM",
+        "nextClassAt": "2026-04-04T03:30:00.000Z",
+        "joinLink": "https://meet.example.com/abc",
+        "categoryColor": "#E3F2FD"
+      }
+    ]
+  }
+}
+```
+
+- **`isLive`:** `true` when server local time is on one of the course’s days and between `startTime` and `endTime`.
+- **`nextClass` / `nextClassAt`:** Earliest upcoming occurrence in the next 14 days (or `null` if none).
+- **`joinLink`:** From ClassTimetable only; `null` when using period-based Timetable unless you add links on the web side later.
 
 ---
 

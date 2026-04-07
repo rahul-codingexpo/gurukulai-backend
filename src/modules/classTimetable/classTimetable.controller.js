@@ -29,6 +29,7 @@ export const createClassTimetable = async (req, res, next) => {
       endTime,
       day,
       roomNumber,
+      joinLink,
       teacherId,
     } = req.body;
 
@@ -78,6 +79,7 @@ export const createClassTimetable = async (req, res, next) => {
       endTime,
       day,
       roomNumber: roomNumber || "",
+      joinLink: joinLink || "",
       teacherId,
     });
 
@@ -264,6 +266,7 @@ export const updateClassTimetable = async (req, res, next) => {
       endTime,
       day,
       roomNumber,
+      joinLink,
       teacherId,
     } = req.body;
 
@@ -274,6 +277,7 @@ export const updateClassTimetable = async (req, res, next) => {
     if (endTime !== undefined) entry.endTime = endTime;
     if (day !== undefined) entry.day = day;
     if (roomNumber !== undefined) entry.roomNumber = roomNumber;
+    if (joinLink !== undefined) entry.joinLink = joinLink;
     if (teacherId !== undefined) entry.teacherId = teacherId;
 
     await entry.save();

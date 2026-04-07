@@ -118,6 +118,20 @@ import bcrypt from "bcryptjs";
 import XLSX from "xlsx";
 import fs from "fs";
 
+const DEFAULT_STUDENT_PASSWORD =
+  process.env.DEFAULT_STUDENT_PASSWORD ||
+  process.env.DEFAULT_USER_PASSWORD ||
+  "12345";
+const DEFAULT_PARENT_PASSWORD =
+  process.env.DEFAULT_PARENT_PASSWORD ||
+  process.env.DEFAULT_USER_PASSWORD ||
+  "123456";
+
+const resolveDefaultPassword = (kind) => {
+  const raw = kind === "parent" ? DEFAULT_PARENT_PASSWORD : DEFAULT_STUDENT_PASSWORD;
+  return String(raw ?? "").trim() || (kind === "parent" ? "123456" : "12345");
+};
+
 const buildPlaceholderEmail = (namespace, uniqueValue) => {
   const safe = String(uniqueValue || "")
     .trim()
@@ -285,7 +299,10 @@ export const createAdmission = async (req, res, next) => {
         });
       }
 
-      const password = await bcrypt.hash(studentLogin.password, 10);
+      const passwordPlain =
+        (typeof studentLogin?.password === "string" && studentLogin.password.trim()) ||
+        resolveDefaultPassword("student");
+      const password = await bcrypt.hash(passwordPlain, 10);
 
       // If you want students to login using phone, send `phone` in body.
       // Fallback to admissionNumber login if phone is not provided.
@@ -355,7 +372,10 @@ export const createAdmission = async (req, res, next) => {
       });
 
       if (!user) {
-        const password = await bcrypt.hash(parentLogin.password, 10);
+        const passwordPlain =
+          (typeof parentLogin?.password === "string" && parentLogin.password.trim()) ||
+          resolveDefaultPassword("parent");
+        const password = await bcrypt.hash(passwordPlain, 10);
         const parentEmail =
           parents?.father?.email ||
           buildPlaceholderEmail("parent", parents.father.phone);
@@ -433,18 +453,7 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
     const wantStudentLogin = studentLogin?.type === "NEW_USER";
     const wantParentLogin = parentLogin?.type === "NEW_USER";
 
-    if (wantStudentLogin && !studentLogin?.password) {
-      return res.status(400).json({
-        success: false,
-        message: "studentLogin.password is required when studentLogin.type = NEW_USER",
-      });
-    }
-    if (wantParentLogin && !parentLogin?.password) {
-      return res.status(400).json({
-        success: false,
-        message: "parentLogin.password is required when parentLogin.type = NEW_USER",
-      });
-    }
+    // Passwords are optional: if not provided, defaults will be used.
 
     const workbook = XLSX.readFile(req.file.path, { cellDates: true });
     const sheetName = workbook.SheetNames[0];
@@ -508,11 +517,18 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
       });
     }
 
+    const studentPasswordPlain =
+      (typeof studentLogin?.password === "string" && studentLogin.password.trim()) ||
+      resolveDefaultPassword("student");
+    const parentPasswordPlain =
+      (typeof parentLogin?.password === "string" && parentLogin.password.trim()) ||
+      resolveDefaultPassword("parent");
+
     const studentPasswordHash = wantStudentLogin
-      ? await bcrypt.hash(studentLogin.password, 10)
+      ? await bcrypt.hash(studentPasswordPlain, 10)
       : null;
     const parentPasswordHash = wantParentLogin
-      ? await bcrypt.hash(parentLogin.password, 10)
+      ? await bcrypt.hash(parentPasswordPlain, 10)
       : null;
 
     // Precheck duplicates by admissionNumber
