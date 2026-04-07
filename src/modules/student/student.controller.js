@@ -114,6 +114,17 @@
 import Student from "./student.model.js";
 import User from "../user/user.model.js";
 import Role from "../auth/role.model.js";
+import StudentAttendance from "../attendance/studentAttendance.model.js";
+import StudentLeave from "../leaves/studentLeave.model.js";
+import HomeworkSubmission from "../homework/homeworkSubmission.model.js";
+import ExamMark from "../exam/examMark.model.js";
+import FeeInvoice from "../accounting/feeInvoice.model.js";
+import Payment from "../accounting/payment.model.js";
+import PastFeeRecord from "../accounting/pastFees/pastFeeRecord.model.js";
+import Wallet from "../wallet/wallet.model.js";
+import WalletPayment from "../wallet/walletPayment.model.js";
+import Promotion from "../promote/promotion.model.js";
+import TransferCertificate from "../tc/tc.model.js";
 import bcrypt from "bcryptjs";
 import XLSX from "xlsx";
 import fs from "fs";
@@ -304,13 +315,13 @@ export const createAdmission = async (req, res, next) => {
         resolveDefaultPassword("student");
       const password = await bcrypt.hash(passwordPlain, 10);
 
-      // If you want students to login using phone, send `phone` in body.
-      // Fallback to admissionNumber login if phone is not provided.
+      // Keep username = admissionNumber so admission-number login always works.
+      // Phone login works via `phone` field in auth lookup.
       const studentPhone = phone || undefined;
-      const studentUsername = studentPhone || admissionNumber;
+      const studentUsername = admissionNumber;
       const studentEmail =
         req.body.email ||
-        buildPlaceholderEmail("student", studentPhone || admissionNumber);
+        buildPlaceholderEmail("student", admissionNumber);
 
       const user = await User.create({
         name,
@@ -647,8 +658,8 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
 
         // STUDENT LOGIN
         if (wantStudentLogin) {
-          const studentUsername = studentPhone || normalizedAdmissionNumber;
-          const studentEmail = buildPlaceholderEmail("student", studentPhone || normalizedAdmissionNumber);
+          const studentUsername = normalizedAdmissionNumber;
+          const studentEmail = buildPlaceholderEmail("student", normalizedAdmissionNumber);
 
           const user = await User.create({
             name: toStr(name),
@@ -1022,7 +1033,7 @@ export const deleteStudent = async (req, res, next) => {
     const schoolId = resolveSchoolId(req);
     const studentId = req.params.id;
 
-    const student = await Student.findOneAndDelete({
+    const student = await Student.findOne({
       _id: studentId,
       schoolId,
     });
@@ -1033,6 +1044,43 @@ export const deleteStudent = async (req, res, next) => {
         message: "Student not found",
       });
     }
+
+    const linkedStudentUserId = student.studentLogin?.userId || null;
+    const linkedParentUserId = student.parentLogin?.userId || null;
+
+    // Delete all child records that directly reference this student.
+    await Promise.all([
+      StudentAttendance.deleteMany({ schoolId, studentId }),
+      StudentLeave.deleteMany({ schoolId, studentId }),
+      HomeworkSubmission.deleteMany({ schoolId, studentId }),
+      ExamMark.deleteMany({ schoolId, studentId }),
+      Payment.deleteMany({ schoolId, studentId }),
+      FeeInvoice.deleteMany({ schoolId, studentId }),
+      PastFeeRecord.deleteMany({ schoolId, studentId }),
+      WalletPayment.deleteMany({ schoolId, studentId }),
+      Wallet.deleteMany({ schoolId, studentId }),
+      Promotion.deleteMany({ schoolId, studentId }),
+      TransferCertificate.deleteMany({ schoolId, studentId }),
+    ]);
+
+    // Delete linked student login user, if present.
+    if (linkedStudentUserId) {
+      await User.deleteOne({ _id: linkedStudentUserId, schoolId });
+    }
+
+    // Delete linked parent login user only if no other student uses it.
+    if (linkedParentUserId) {
+      const siblingsUsingSameParent = await Student.countDocuments({
+        schoolId,
+        _id: { $ne: student._id },
+        "parentLogin.userId": linkedParentUserId,
+      });
+      if (siblingsUsingSameParent === 0) {
+        await User.deleteOne({ _id: linkedParentUserId, schoolId });
+      }
+    }
+
+    await student.deleteOne();
 
     res.json({
       success: true,

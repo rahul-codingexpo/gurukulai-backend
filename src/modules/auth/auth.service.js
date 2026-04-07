@@ -1,4 +1,5 @@
 import User from "../user/user.model.js";
+import Student from "../student/student.model.js";
 import { comparePassword } from "../../utils/hash.js";
 import { generateToken } from "../../utils/jwt.js";
 import crypto from "crypto";
@@ -17,6 +18,36 @@ const emailOnlyRoles = new Set([
   "Librarian",
 ]);
 const usernamePhoneRoles = new Set(["Student", "Parent", "Staff"]);
+
+const findUserByLoginId = async (resolvedLoginId) => {
+  const normalizedEmail = String(resolvedLoginId).trim().toLowerCase();
+
+  const directUser = await User.findOne({
+    $or: [
+      { email: normalizedEmail },
+      { phone: resolvedLoginId },
+      { username: resolvedLoginId },
+    ],
+  })
+    .select("+password +passwordReset.otpHash +passwordReset.expiresAt +passwordReset.lastSentAt")
+    .populate("roleId");
+
+  if (directUser) return directUser;
+
+  // Backward-compatible fallback: older student users may have username=phone.
+  // Allow admission number login by resolving Student -> studentLogin.userId.
+  const linkedStudent = await Student.findOne({
+    admissionNumber: String(resolvedLoginId).trim(),
+    "studentLogin.enabled": true,
+    "studentLogin.userId": { $ne: null },
+  }).select("studentLogin.userId");
+
+  if (!linkedStudent?.studentLogin?.userId) return null;
+
+  return User.findById(linkedStudent.studentLogin.userId)
+    .select("+password +passwordReset.otpHash +passwordReset.expiresAt +passwordReset.lastSentAt")
+    .populate("roleId");
+};
 
 const enforceIdentifierByRole = ({ user, resolvedLoginId }) => {
   const roleName = user?.roleId?.name;
@@ -61,17 +92,7 @@ export const loginService = async (body = {}) => {
     throw err;
   }
 
-  const normalizedEmail = String(resolvedLoginId).trim().toLowerCase();
-
-  const user = await User.findOne({
-    $or: [
-      { email: normalizedEmail },
-      { phone: resolvedLoginId },
-      { username: resolvedLoginId },
-    ],
-  })
-    .select("+password")
-    .populate("roleId");
+  const user = await findUserByLoginId(resolvedLoginId);
 
   if (!user) {
     const err = new Error("Invalid credentials");
@@ -111,19 +132,7 @@ export const forgotPasswordService = async (body = {}) => {
 
   if (!resolvedLoginId) throw new Error("loginId is required");
 
-  const normalizedEmail = String(resolvedLoginId).trim().toLowerCase();
-
-  const user = await User.findOne({
-    $or: [
-      { email: normalizedEmail },
-      { phone: resolvedLoginId },
-      { username: resolvedLoginId },
-    ],
-  })
-    .populate("roleId")
-    .select(
-      "+passwordReset.otpHash +passwordReset.expiresAt +passwordReset.lastSentAt",
-    );
+  const user = await findUserByLoginId(resolvedLoginId);
 
   // Don't leak whether user exists
   if (!user) {
@@ -166,17 +175,7 @@ export const resetPasswordService = async (body = {}) => {
   if (!otp) throw new Error("otp is required");
   if (!newPassword) throw new Error("newPassword is required");
 
-  const normalizedEmail = String(resolvedLoginId).trim().toLowerCase();
-
-  const user = await User.findOne({
-    $or: [
-      { email: normalizedEmail },
-      { phone: resolvedLoginId },
-      { username: resolvedLoginId },
-    ],
-  })
-    .populate("roleId")
-    .select("+password +passwordReset.otpHash +passwordReset.expiresAt");
+  const user = await findUserByLoginId(resolvedLoginId);
 
   if (!user) throw new Error("Invalid OTP");
 
