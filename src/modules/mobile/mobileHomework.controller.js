@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import Homework from "../homework/homework.model.js";
 import HomeworkSubmission from "../homework/homeworkSubmission.model.js";
+import HomeworkQuestion from "../homework/homeworkQuestion.model.js";
 import Student from "../student/student.model.js";
 import ClassModel from "../academic/class.model.js";
 import Section from "../academic/section.model.js";
@@ -211,6 +212,64 @@ function summaryFromStudentItems(items) {
   return { pending, overdue, completed };
 }
 
+const teacherHomeworkStatus = (dueDate, submissionPercent, now = new Date()) => {
+  const due = dueDate ? new Date(dueDate) : null;
+  if (submissionPercent >= 100) return "COMPLETED";
+  if (due && now > due) return "OVERDUE";
+  return "ACTIVE";
+};
+
+const teacherStatusLabel = (status) => {
+  if (status === "COMPLETED") return "Completed";
+  if (status === "OVERDUE") return "Overdue";
+  return "Active";
+};
+
+const pctFloor = (n, d) => (d > 0 ? Math.floor((n / d) * 100) : 0);
+
+const studentCountCacheKey = (schoolId, className, section) =>
+  `${String(schoolId)}::${String(className || "")}::${String(section || "")}`;
+
+async function resolveTotalStudentsForHomework(hw, cache) {
+  const className = hw.classId?.name || null;
+  const sectionName = hw.sectionId?.name || null;
+  if (!className || !sectionName) return 0;
+  const key = studentCountCacheKey(hw.schoolId, className, sectionName);
+  if (cache.has(key)) return cache.get(key);
+  const total = await Student.countDocuments({
+    schoolId: hw.schoolId,
+    className,
+    section: sectionName,
+    status: "ACTIVE",
+  });
+  cache.set(key, total);
+  return total;
+}
+
+function buildTeacherListItem(hw, submittedCount, totalStudents, now = new Date()) {
+  const submissionPercent = pctFloor(submittedCount, totalStudents);
+  const status = teacherHomeworkStatus(hw.dueDate, submissionPercent, now);
+  return {
+    _id: hw._id,
+    title: hw.title,
+    description: hw.description,
+    subjectName: hw.subjectId?.name || null,
+    subjectCode: hw.subjectId?.code || null,
+    className: hw.classId?.name || null,
+    section: hw.sectionId?.name || null,
+    assignedDate: hw.date || null,
+    dueDate: hw.dueDate || null,
+    status,
+    statusLabel: teacherStatusLabel(status),
+    submissionStats: {
+      submitted: submittedCount,
+      totalStudents,
+      percentage: submissionPercent,
+    },
+    attachmentsCount: (hw.files || []).length,
+  };
+}
+
 async function serializeStudentHomeworkDetail(hw, submission, now = new Date()) {
   const due = hw.dueDate ? new Date(hw.dueDate) : null;
   const submitted = !!submission;
@@ -292,8 +351,37 @@ export const listMobileHomework = async (req, res, next) => {
         sectionId: { $in: sectionIds },
       };
 
-      const { subjectId, filter: statusFilter } = req.query;
+      const { subjectId, subject, filter: statusFilter } = req.query;
       if (subjectId) filter.subjectId = subjectId;
+      if (subject) {
+        const subjectRegex = new RegExp(`^${String(subject).trim()}$`, "i");
+        const classesFilter = {
+          schoolId: student.schoolId,
+          classId: { $in: classIds },
+          sectionId: { $in: sectionIds },
+        };
+        if (subjectId) classesFilter._id = subjectId;
+
+        const matchedSubjectIds = await Homework.find(classesFilter)
+          .populate({
+            path: "subjectId",
+            select: "_id name",
+            match: { name: subjectRegex },
+          })
+          .select("subjectId")
+          .lean();
+        const ids = matchedSubjectIds
+          .map((x) => x.subjectId?._id)
+          .filter(Boolean);
+        if (!ids.length) {
+          return res.json({
+            success: true,
+            summary: { pending: 0, overdue: 0, completed: 0 },
+            data: [],
+          });
+        }
+        filter.subjectId = { $in: ids };
+      }
 
       const list = await Homework.find(filter)
         .populate("classId", "name")
@@ -342,6 +430,9 @@ export const listMobileHomework = async (req, res, next) => {
       if (req.query.classId) filter.classId = req.query.classId;
       if (req.query.sectionId) filter.sectionId = req.query.sectionId;
       if (req.query.subjectId) filter.subjectId = req.query.subjectId;
+      if (req.query.search) {
+        filter.title = { $regex: String(req.query.search).trim(), $options: "i" };
+      }
 
       const list = await Homework.find(filter)
         .populate("classId", "name")
@@ -350,13 +441,109 @@ export const listMobileHomework = async (req, res, next) => {
         .populate("createdBy", "name")
         .sort({ dueDate: -1, createdAt: -1 });
 
-      return res.json({ success: true, data: list });
+      const hwIds = list.map((h) => h._id);
+      const submissionRows = hwIds.length
+        ? await HomeworkSubmission.aggregate([
+            { $match: { homeworkId: { $in: hwIds } } },
+            { $group: { _id: "$homeworkId", count: { $sum: 1 } } },
+          ])
+        : [];
+      const submittedByHw = new Map(
+        submissionRows.map((r) => [String(r._id), r.count || 0]),
+      );
+
+      const now = new Date();
+      const cache = new Map();
+      let items = [];
+      for (const hw of list) {
+        const submittedCount = submittedByHw.get(String(hw._id)) || 0;
+        const totalStudents = await resolveTotalStudentsForHomework(hw, cache);
+        items.push(buildTeacherListItem(hw, submittedCount, totalStudents, now));
+      }
+
+      const summary = {
+        active: items.filter((i) => i.status === "ACTIVE").length,
+        completed: items.filter((i) => i.status === "COMPLETED").length,
+        overdue: items.filter((i) => i.status === "OVERDUE").length,
+      };
+
+      const statusFilter = String(req.query.status || "").toUpperCase();
+      if (["ACTIVE", "COMPLETED", "OVERDUE"].includes(statusFilter)) {
+        items = items.filter((i) => i.status === statusFilter);
+      }
+
+      return res.json({ success: true, summary, data: items });
     }
 
     return res.status(403).json({
       success: false,
       message: "Homework list is available for Student, Parent, or Teacher",
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** GET /api/mobile/homework/subjects — Student/Parent subject tabs */
+export const listMobileHomeworkSubjects = async (req, res, next) => {
+  try {
+    const role = roleNameOf(req);
+    if (role !== "Student" && role !== "Parent") {
+      return res.status(403).json({
+        success: false,
+        message: "Only students and parents can access homework subjects",
+      });
+    }
+
+    const student = await resolveStudentSelf(req);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found for this user",
+      });
+    }
+
+    const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
+    if (!classIds.length || !sectionIds.length) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const rows = await Homework.aggregate([
+      {
+        $match: {
+          schoolId: student.schoolId,
+          classId: { $in: classIds },
+          sectionId: { $in: sectionIds },
+        },
+      },
+      {
+        $group: {
+          _id: "$subjectId",
+          totalHomework: { $sum: 1 },
+        },
+      },
+      {
+        $lookup: {
+          from: "subjects",
+          localField: "_id",
+          foreignField: "_id",
+          as: "subject",
+        },
+      },
+      { $unwind: "$subject" },
+      {
+        $project: {
+          _id: 0,
+          subjectId: "$subject._id",
+          subjectName: "$subject.name",
+          subjectCode: "$subject.code",
+          totalHomework: 1,
+        },
+      },
+      { $sort: { subjectName: 1 } },
+    ]);
+
+    return res.json({ success: true, data: rows });
   } catch (err) {
     next(err);
   }
@@ -437,7 +624,40 @@ export const getMobileHomeworkById = async (req, res, next) => {
           message: "You can only open homework you assigned",
         });
       }
-      return res.json({ success: true, data: homework });
+
+      const totalStudents = await Student.countDocuments({
+        schoolId: homework.schoolId,
+        className: homework.classId?.name || "",
+        section: homework.sectionId?.name || "",
+        status: "ACTIVE",
+      });
+      const submitted = await HomeworkSubmission.countDocuments({
+        homeworkId: homework._id,
+      });
+      const percentage = pctFloor(submitted, totalStudents);
+      const attachments = await Promise.all(
+        (homework.files || []).map((p) => buildFileResource(p, true, true)),
+      );
+
+      return res.json({
+        success: true,
+        data: {
+          _id: homework._id,
+          subjectName: homework.subjectId?.name || null,
+          className: homework.classId?.name || null,
+          section: homework.sectionId?.name || null,
+          title: homework.title,
+          description: homework.description,
+          assignedDate: homework.date || null,
+          dueDate: homework.dueDate || null,
+          submissionStatus: {
+            submitted,
+            totalStudents,
+            percentage,
+          },
+          attachedDocuments: attachments,
+        },
+      });
     }
 
     return res.status(403).json({
@@ -776,6 +996,89 @@ export const submitMobileHomework = async (req, res, next) => {
         files: submission.files,
         submittedAt: submission.submittedAt,
         updatedAt: submission.updatedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** POST /api/mobile/homework/:id/questions — Ask teacher question on homework */
+export const askTeacherOnHomework = async (req, res, next) => {
+  try {
+    const role = roleNameOf(req);
+    if (role !== "Student" && role !== "Parent") {
+      return res.status(403).json({
+        success: false,
+        message: "Only students (or parent on behalf of child) can ask questions",
+      });
+    }
+
+    const student = await resolveStudentSelf(req);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found for this user",
+      });
+    }
+
+    const homework = await Homework.findById(req.params.id);
+    if (!homework) {
+      return res.status(404).json({
+        success: false,
+        message: "Homework not found",
+      });
+    }
+
+    if (String(homework.schoolId) !== String(student.schoolId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Not allowed to ask on this homework",
+      });
+    }
+
+    const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
+    const okClass = classIds.some((id) => String(id) === String(homework.classId));
+    const okSection = sectionIds.some((id) => String(id) === String(homework.sectionId));
+    if (!okClass || !okSection) {
+      return res.status(403).json({
+        success: false,
+        message: "This homework is not for your class/section",
+      });
+    }
+
+    const question = String(req.body?.question || "").trim();
+    if (!question) {
+      return res.status(400).json({
+        success: false,
+        message: "question is required",
+      });
+    }
+    if (question.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: "question must be <= 1000 characters",
+      });
+    }
+
+    const doc = await HomeworkQuestion.create({
+      schoolId: student.schoolId,
+      homeworkId: homework._id,
+      studentId: student._id,
+      askedByUserId: req.user._id,
+      question,
+      status: "OPEN",
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Question sent to teacher",
+      data: {
+        _id: doc._id,
+        homeworkId: doc.homeworkId,
+        question: doc.question,
+        status: doc.status,
+        createdAt: doc.createdAt,
       },
     });
   } catch (err) {

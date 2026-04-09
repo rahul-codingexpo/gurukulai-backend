@@ -6,6 +6,8 @@ import {
   createQuestion,
   deleteQuestion,
   getMobileQuizQuestions,
+  listMobileQuizSubjects,
+  listMobileQuizTopicsBySubject,
   listMobileQuizzes,
   listQuestions,
   submitMobileQuiz,
@@ -44,6 +46,8 @@ router.delete("/:id", protect, requireSuperAdmin, deleteQuestion);
 const mobileRouter = express.Router({ mergeParams: true });
 
 mobileRouter.get("/quizzes", listMobileQuizzes);
+mobileRouter.get("/subjects", listMobileQuizSubjects);
+mobileRouter.get("/topics", listMobileQuizTopicsBySubject);
 mobileRouter.get("/quizzes/questions", getMobileQuizQuestions);
 mobileRouter.post("/quizzes/submit", submitMobileQuiz);
 

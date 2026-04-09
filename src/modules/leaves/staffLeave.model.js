@@ -29,6 +29,13 @@ const staffLeaveSchema = new mongoose.Schema(
       maxlength: 1000,
     },
 
+    leaveCategory: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: "",
+    },
+
     leaveFrom: {
       type: Date,
       required: true,
@@ -41,9 +48,22 @@ const staffLeaveSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["Approved", "Unapproved"],
+      enum: ["Approved", "Unapproved", "Rejected"],
       default: "Unapproved",
       index: true,
+    },
+
+    emergencyContactName: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      default: "",
+    },
+    emergencyContactPhone: {
+      type: String,
+      trim: true,
+      maxlength: 30,
+      default: "",
     },
 
     approvedBy: {

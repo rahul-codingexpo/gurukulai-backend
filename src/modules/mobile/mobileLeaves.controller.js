@@ -30,11 +30,35 @@ const dateOnly = (d) => {
   return Number.isNaN(x.getTime()) ? null : x;
 };
 
+const statusKey = (s) => {
+  if (s === "Approved") return "approved";
+  if (s === "Rejected") return "rejected";
+  return "pending";
+};
+
+const daysBetweenInclusive = (from, to) => {
+  const a = new Date(from);
+  const b = new Date(to);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 0;
+  const d1 = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+  const d2 = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+  const diff = Math.floor((d2 - d1) / 86400000);
+  return Math.max(diff + 1, 0);
+};
+
 /** POST /api/mobile/leaves/me/apply */
 export const applyMyLeaveMobile = async (req, res, next) => {
   try {
     const role = roleNameOf(req);
-    const { reason, leaveFrom, leaveTo, leaveType = "student" } = req.body || {};
+    const {
+      reason,
+      leaveFrom,
+      leaveTo,
+      leaveType = "student",
+      leaveCategory = "",
+      emergencyContactName = "",
+      emergencyContactPhone = "",
+    } = req.body || {};
     if (!reason || !leaveFrom || !leaveTo) {
       return res.status(400).json({
         success: false,
@@ -84,9 +108,12 @@ export const applyMyLeaveMobile = async (req, res, next) => {
       staffId: staff._id,
       appliedDate: new Date(),
       reason,
+      leaveCategory: String(leaveCategory || "").trim(),
       leaveFrom: from,
       leaveTo: to,
       status: "Unapproved",
+      emergencyContactName: String(emergencyContactName || "").trim(),
+      emergencyContactPhone: String(emergencyContactPhone || "").trim(),
     });
     return res.status(201).json({ success: true, data: leave });
   } catch (error) {
@@ -264,8 +291,8 @@ export const approveRejectLeaveMobile = async (req, res, next) => {
     if (!schoolId) return res.status(400).json({ success: false, message: "School context missing" });
 
     const { type = "student", status } = req.body || {};
-    if (!["Approved", "Unapproved"].includes(status)) {
-      return res.status(400).json({ success: false, message: "status must be Approved or Unapproved" });
+    if (!["Approved", "Unapproved", "Rejected"].includes(status)) {
+      return res.status(400).json({ success: false, message: "status must be Approved, Unapproved or Rejected" });
     }
 
     if (type === "student") {
@@ -285,6 +312,126 @@ export const approveRejectLeaveMobile = async (req, res, next) => {
     leave.approvedAt = status === "Approved" ? new Date() : null;
     await leave.save();
     return res.json({ success: true, data: leave });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** GET /api/mobile/leaves/staff/me/dashboard */
+export const getTeacherLeavesDashboardMobile = async (req, res, next) => {
+  try {
+    const role = roleNameOf(req);
+    if (!["Teacher", "Staff", "Principal"].includes(role)) {
+      return res.status(403).json({ success: false, message: "Not allowed" });
+    }
+    const staff = await resolveStaffSelf(req);
+    if (!staff) return res.status(404).json({ success: false, message: "Staff profile not found" });
+
+    const { status = "all", type = "all", search = "" } = req.query || {};
+    const filter = { schoolId: staff.schoolId, staffId: staff._id };
+    const statusKeyFilter = String(status).toLowerCase();
+    if (statusKeyFilter === "approved") filter.status = "Approved";
+    else if (statusKeyFilter === "pending") filter.status = "Unapproved";
+    else if (statusKeyFilter === "rejected") filter.status = "Rejected";
+
+    if (type && String(type).toLowerCase() !== "all") {
+      filter.leaveCategory = String(type).trim();
+    }
+    if (search && String(search).trim()) {
+      filter.reason = { $regex: String(search).trim(), $options: "i" };
+    }
+
+    const leaves = await StaffLeave.find(filter)
+      .populate("approvedBy", "name")
+      .sort({ appliedDate: -1, createdAt: -1 })
+      .lean();
+
+    const totalApplied = leaves.length;
+    const approved = leaves.filter((l) => l.status === "Approved").length;
+    const pending = leaves.filter((l) => l.status === "Unapproved").length;
+    const rejected = leaves.filter((l) => l.status === "Rejected").length;
+    const daysTaken = leaves
+      .filter((l) => l.status === "Approved")
+      .reduce((sum, l) => sum + daysBetweenInclusive(l.leaveFrom, l.leaveTo), 0);
+
+    return res.json({
+      success: true,
+      data: {
+        leaveBalance: {
+          casualLeave: null,
+          sickLeave: null,
+        },
+        summary: { totalApplied, daysTaken, approved, pending, rejected },
+        items: leaves.map((l) => ({
+          _id: l._id,
+          leaveType: l.leaveCategory || "Leave",
+          status: statusKey(l.status),
+          statusLabel: l.status === "Unapproved" ? "Pending" : l.status,
+          appliedDate: l.appliedDate,
+          leaveFrom: l.leaveFrom,
+          leaveTo: l.leaveTo,
+          durationDays: daysBetweenInclusive(l.leaveFrom, l.leaveTo),
+          reason: l.reason,
+          approvedByName: l.approvedBy?.name || null,
+          approvedAt: l.approvedAt || null,
+        })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** GET /api/mobile/leaves/staff/me/:id */
+export const getTeacherLeaveByIdMobile = async (req, res, next) => {
+  try {
+    const role = roleNameOf(req);
+    if (!["Teacher", "Staff", "Principal"].includes(role)) {
+      return res.status(403).json({ success: false, message: "Not allowed" });
+    }
+    const staff = await resolveStaffSelf(req);
+    if (!staff) return res.status(404).json({ success: false, message: "Staff profile not found" });
+
+    const leave = await StaffLeave.findOne({
+      _id: req.params.id,
+      schoolId: staff.schoolId,
+      staffId: staff._id,
+    })
+      .populate("approvedBy", "name")
+      .lean();
+    if (!leave) return res.status(404).json({ success: false, message: "Leave not found" });
+
+    return res.json({
+      success: true,
+      data: {
+        _id: leave._id,
+        applicationId: `#${String(leave._id).slice(-6)}`,
+        leaveType: leave.leaveCategory || "Leave",
+        status: statusKey(leave.status),
+        statusLabel: leave.status === "Unapproved" ? "Pending" : leave.status,
+        appliedOn: leave.appliedDate,
+        leaveFrom: leave.leaveFrom,
+        leaveTo: leave.leaveTo,
+        durationDays: daysBetweenInclusive(leave.leaveFrom, leave.leaveTo),
+        reason: leave.reason,
+        contactInformation: {
+          contactNumber: leave.emergencyContactPhone || null,
+          emergencyContact: leave.emergencyContactPhone || null,
+          emergencyContactName: leave.emergencyContactName || null,
+        },
+        approval: leave.status === "Approved"
+          ? {
+              approved: true,
+              approvedBy: leave.approvedBy?.name || null,
+              approvedAt: leave.approvedAt || null,
+            }
+          : {
+              approved: false,
+              approvedBy: null,
+              approvedAt: null,
+            },
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -324,9 +471,59 @@ export const updateStudentLeaveStatusMobile = (req, res, next) => {
   return approveRejectLeaveMobile(req, res, next);
 };
 
-export const applyStaffLeaveMobile = (req, res, next) => {
-  req.body = { ...(req.body || {}), leaveType: "staff" };
-  return applyMyLeaveMobile(req, res, next);
+export const applyStaffLeaveMobile = async (req, res, next) => {
+  try {
+    const role = roleNameOf(req);
+    if (!["Teacher", "Staff", "Principal"].includes(role)) {
+      return res.status(403).json({ success: false, message: "Not allowed" });
+    }
+
+    const { leaveType, leaveFrom, leaveTo, reason, emergencyContactName, emergencyContactPhone } =
+      req.body || {};
+    if (!leaveType || !leaveFrom || !leaveTo || !reason) {
+      return res.status(400).json({
+        success: false,
+        message: "leaveType, leaveFrom, leaveTo and reason are required",
+      });
+    }
+    if (String(reason).trim().length > 1000) {
+      return res.status(400).json({ success: false, message: "reason must be <= 1000 characters" });
+    }
+
+    req.body = {
+      ...(req.body || {}),
+      leaveType: "staff",
+      leaveCategory: leaveType,
+      emergencyContactName,
+      emergencyContactPhone,
+    };
+    const resProxy = {
+      status: (code) => ({
+        json: (payload) => ({ code, payload }),
+      }),
+    };
+    const out = await applyMyLeaveMobile(req, resProxy, next);
+    if (!out?.payload?.success) {
+      return res.status(out?.code || 400).json(out?.payload || { success: false, message: "Unable to apply leave" });
+    }
+
+    const leave = out.payload.data;
+    const durationDays = daysBetweenInclusive(leave.leaveFrom, leave.leaveTo);
+    return res.status(201).json({
+      success: true,
+      message: "Leave application submitted successfully",
+      data: {
+        _id: leave._id,
+        leaveType: leave.leaveCategory || leaveType,
+        durationDays,
+        status: "Pending Approval",
+        leaveFrom: leave.leaveFrom,
+        leaveTo: leave.leaveTo,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 export const getStaffLeavesMobile = (req, res, next) => {

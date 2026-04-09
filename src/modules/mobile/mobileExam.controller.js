@@ -65,6 +65,29 @@ const formatDDMMYYYY = (value) => {
   return `${dd}-${mm}-${yyyy}`;
 };
 
+const parseTimeToMinutes = (value) => {
+  const s = String(value || "").trim();
+  const m24 = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    return parseInt(m24[1], 10) * 60 + parseInt(m24[2], 10);
+  }
+  const m12 = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (m12) {
+    let h = parseInt(m12[1], 10);
+    const min = parseInt(m12[2], 10);
+    const ap = m12[3].toUpperCase();
+    if (ap === "PM" && h !== 12) h += 12;
+    if (ap === "AM" && h === 12) h = 0;
+    return h * 60 + min;
+  }
+  return Number.MAX_SAFE_INTEGER;
+};
+
+const examSortKey = (item) => {
+  const dateStart = item?.dateStart ? new Date(item.dateStart).getTime() : Number.MAX_SAFE_INTEGER;
+  return dateStart;
+};
+
 const iconIdentifierFromSubject = (name, code) => {
   const raw = String(code || name || "subject")
     .toLowerCase()
@@ -181,7 +204,7 @@ export const listMobileExams = async (req, res, next) => {
       }
 
       const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
-      if (!classIds.length || !sectionIds.length) {
+      if (!classIds.length) {
         return res.json({
           success: true,
           summary: { upcoming: 0, ongoing: 0, completed: 0 },
@@ -192,8 +215,13 @@ export const listMobileExams = async (req, res, next) => {
       const filter = {
         schoolId: student.schoolId,
         classId: { $in: classIds },
-        $or: [{ sectionId: null }, { sectionId: { $in: sectionIds } }],
       };
+      // Show class-wide exams even when no section mapping is found.
+      if (sectionIds.length) {
+        filter.$or = [{ sectionId: null }, { sectionId: { $in: sectionIds } }];
+      } else {
+        filter.sectionId = null;
+      }
       if (req.query.sessionId) filter.sessionId = req.query.sessionId;
 
       const exams = await Exam.find(filter)
@@ -213,6 +241,7 @@ export const listMobileExams = async (req, res, next) => {
       } else if (statusQuery === "completed") {
         items = items.filter((i) => i.status === "COMPLETED");
       }
+      items.sort((a, b) => examSortKey(a) - examSortKey(b));
 
       return res.json({ success: true, summary, data: items });
     }
@@ -248,6 +277,7 @@ export const listMobileExams = async (req, res, next) => {
       } else if (statusQuery === "completed") {
         items = items.filter((i) => i.status === "COMPLETED");
       }
+      items.sort((a, b) => examSortKey(a) - examSortKey(b));
 
       return res.json({ success: true, summary, data: items });
     }
@@ -340,6 +370,11 @@ export const getMobileExamById = async (req, res, next) => {
         time_range: `${row.startTime} - ${row.endTime}`,
         icon_identifier: iconIdentifierFromSubject(subjectName, subjectCode),
       };
+    }).sort((a, b) => {
+      const ta = toDateOnly(a.examDate)?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+      const tb = toDateOnly(b.examDate)?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+      if (ta !== tb) return ta - tb;
+      return parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time);
     });
 
     const data = {

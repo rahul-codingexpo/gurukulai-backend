@@ -3,6 +3,7 @@ import { protect } from "../../middleware/auth.middleware.js";
 import {
   getMobileDashboard,
   getMobileEventById,
+  getTeacherDashboard,
   listMobileEvents,
   markMobileEventRead,
 } from "./mobileDashboard.controller.js";
@@ -10,7 +11,10 @@ import { getMobileProfile } from "./mobileProfile.controller.js";
 import {
   getMobileStudentAttendanceMonth,
   getMobileStaffAttendanceMonth,
+  getTeacherStudentAttendanceClasses,
+  getTeacherSelfAttendanceMonth,
   getTeacherStudentsForMarking,
+  teacherMarkSelfAttendance,
   teacherMarkStudentAttendance,
 } from "./mobileAttendance.controller.js";
 import {
@@ -36,6 +40,8 @@ import {
   updateStudentLeaveStatusMobile,
   applyStaffLeaveMobile,
   getStaffLeavesMobile,
+  getTeacherLeaveByIdMobile,
+  getTeacherLeavesDashboardMobile,
   updateStaffLeaveMobile,
   deleteStaffLeaveMobile,
   listPendingStaffLeavesMobile,
@@ -43,7 +49,9 @@ import {
 } from "./mobileLeaves.controller.js";
 import { uploadStudyMaterials } from "../../middleware/upload.middleware.js";
 import {
+  askTeacherOnHomework,
   listMobileHomework,
+  listMobileHomeworkSubjects,
   getMobileHomeworkById,
   createMobileHomework,
   updateMobileHomework,
@@ -65,6 +73,7 @@ const mobileOnly = (req, res, next) => {
 
 // Mobile dashboard: any authenticated user
 router.get("/dashboard", protect, mobileOnly, getMobileDashboard);
+router.get("/dashboard/teacher", protect, mobileOnly, getTeacherDashboard);
 
 // Mobile profile (header avatar -> profile screen)
 router.get("/profile", protect, mobileOnly, getMobileProfile);
@@ -95,7 +104,27 @@ router.get(
   getMobileStaffAttendanceMonth
 );
 
+// Teacher self attendance (mobile mark attendance screen)
+router.post(
+  "/attendance/teacher/self",
+  protect,
+  mobileOnly,
+  teacherMarkSelfAttendance
+);
+router.get(
+  "/attendance/teacher/self",
+  protect,
+  mobileOnly,
+  getTeacherSelfAttendanceMonth
+);
+
 // Teacher flow: select class -> list students
+router.get(
+  "/attendance/teacher/classes",
+  protect,
+  mobileOnly,
+  getTeacherStudentAttendanceClasses
+);
 router.get(
   "/attendance/teacher/students",
   protect,
@@ -133,6 +162,7 @@ router.get("/gallery", protect, mobileOnly, getGalleryList);
 router.get("/gallery/:id", protect, mobileOnly, getGalleryById);
 
 // -------- Homework (Mobile) --------
+router.get("/homework/subjects", protect, mobileOnly, listMobileHomeworkSubjects);
 router.get("/homework", protect, mobileOnly, listMobileHomework);
 router.post(
   "/homework",
@@ -148,6 +178,7 @@ router.post(
   uploadStudyMaterials.fields([{ name: "files", maxCount: 10 }]),
   submitMobileHomework,
 );
+router.post("/homework/:id/questions", protect, mobileOnly, askTeacherOnHomework);
 router.get("/homework/:id", protect, mobileOnly, getMobileHomeworkById);
 router.put(
   "/homework/:id",
@@ -178,6 +209,8 @@ router.put("/leaves/students/:id/status", protect, mobileOnly, updateStudentLeav
 // Staff leaves
 router.post("/leaves/staff/me/apply", protect, mobileOnly, applyStaffLeaveMobile);
 router.get("/leaves/staff/me", protect, mobileOnly, getStaffLeavesMobile);
+router.get("/leaves/staff/me/dashboard", protect, mobileOnly, getTeacherLeavesDashboardMobile);
+router.get("/leaves/staff/me/:id", protect, mobileOnly, getTeacherLeaveByIdMobile);
 router.put("/leaves/staff/me/:id", protect, mobileOnly, updateStaffLeaveMobile);
 router.delete("/leaves/staff/me/:id", protect, mobileOnly, deleteStaffLeaveMobile);
 router.get("/leaves/staff/pending", protect, mobileOnly, listPendingStaffLeavesMobile);

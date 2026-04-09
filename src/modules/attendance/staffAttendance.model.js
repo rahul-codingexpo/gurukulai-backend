@@ -27,6 +27,13 @@ const staffAttendanceSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Optional display status for mobile self-mark flow (Present/Absent/Late)
+    markType: {
+      type: String,
+      enum: ["Present", "Absent", "Late"],
+      default: undefined,
+    },
+
     entryTime: {
       type: String,
       trim: true,

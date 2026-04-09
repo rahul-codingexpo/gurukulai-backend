@@ -41,7 +41,7 @@ const studentLeaveSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["Approved", "Unapproved"],
+      enum: ["Approved", "Unapproved", "Rejected"],
       default: "Unapproved",
       index: true,
     },

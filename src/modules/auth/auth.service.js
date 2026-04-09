@@ -1,5 +1,6 @@
 import User from "../user/user.model.js";
 import Student from "../student/student.model.js";
+import Staff from "../staff/staff.model.js";
 import { comparePassword } from "../../utils/hash.js";
 import { generateToken } from "../../utils/jwt.js";
 import crypto from "crypto";
@@ -74,6 +75,70 @@ const enforceIdentifierByRole = ({ user, resolvedLoginId }) => {
   }
 };
 
+const enrichLoginUserForMobile = async (user) => {
+  const roleName = user?.roleId?.name;
+  const userId = user?._id;
+
+  if (!roleName || !userId) return {};
+
+  if (roleName === "Student") {
+    const student = await Student.findOne({ "studentLogin.userId": userId })
+      .select("name admissionNumber className section rollNumber documents.studentPhoto")
+      .lean();
+
+    return {
+      profilePhoto: student?.documents?.studentPhoto || null,
+      profileDetails: {
+        displayName: student?.name || user.name || "",
+        admissionNumber: student?.admissionNumber || "",
+        className: student?.className || "",
+        section: student?.section || "",
+        rollNumber: student?.rollNumber || "",
+      },
+    };
+  }
+
+  if (roleName === "Parent") {
+    const student = await Student.findOne({ "parentLogin.userId": userId })
+      .select("name admissionNumber className section rollNumber documents.studentPhoto parents")
+      .lean();
+
+    return {
+      profilePhoto: student?.documents?.studentPhoto || null,
+      profileDetails: {
+        displayName: user.name || null,
+        relation: "Parent",
+        childName: student?.name || null,
+        admissionNumber: student?.admissionNumber || null,
+        className: student?.className || null,
+        section: student?.section || null,
+        rollNumber: student?.rollNumber || null,
+        fatherName: student?.parents?.father?.name || null,
+        fatherPhone: student?.parents?.father?.phone || null,
+        motherName: student?.parents?.mother?.name || null,
+        motherPhone: student?.parents?.mother?.phone || null,
+      },
+    };
+  }
+
+  if (roleName === "Teacher") {
+    const staff = await Staff.findOne({ userId })
+      .select("name designation photoUrl")
+      .lean();
+
+    return {
+      profilePhoto: staff?.photoUrl || null,
+      profileDetails: {
+        displayName: staff?.name || user.name || "",
+        designation: staff?.designation || "Teacher",
+        staffId: staff?._id ? String(staff._id) : "",
+      },
+    };
+  }
+
+  return {};
+};
+
 export const loginService = async (body = {}) => {
   const { loginId, email, phone, username, password } = body;
 
@@ -119,10 +184,14 @@ export const loginService = async (body = {}) => {
   // ✅ remove sensitive fields
   const userObj = user.toObject();
   delete userObj.password;
+  const mobileProfileInfo = await enrichLoginUserForMobile(user);
 
   return {
     token,
-    user: userObj,
+    user: {
+      ...userObj,
+      ...mobileProfileInfo,
+    },
   };
 };
 

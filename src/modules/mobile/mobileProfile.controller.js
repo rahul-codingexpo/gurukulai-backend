@@ -33,7 +33,7 @@ export const getMobileProfile = async (req, res, next) => {
   try {
     const role = roleNameOf(req);
 
-    // Student / Parent -> Student profile
+    // Student / Parent -> Student-linked profile
     if (role === "Student" || role === "Parent") {
       const student = await resolveStudentSelf(req);
       if (!student) {
@@ -51,6 +51,25 @@ export const getMobileProfile = async (req, res, next) => {
 
       const fatherName = student?.parents?.father?.name || "";
       const fatherPhone = student?.parents?.father?.phone || "";
+      const motherName = student?.parents?.mother?.name || "";
+      const motherPhone = student?.parents?.mother?.phone || "";
+      const emergencyNumber = fatherPhone || motherPhone || "";
+
+      const isParent = role === "Parent";
+      const parentName = req.user?.name || null;
+      const parentPhone = req.user?.phone || null;
+      const parentEmail = req.user?.email || null;
+      const parentProfileDetails = {
+        name: parentName,
+        phone: parentPhone,
+        email: parentEmail,
+        relation: "Parent",
+        childName: student?.name || null,
+        childAdmissionNumber: student?.admissionNumber || null,
+        childClassName: student?.className || null,
+        childSection: student?.section || null,
+        childRollNumber: student?.rollNumber || null,
+      };
 
       return res.json({
         success: true,
@@ -61,35 +80,40 @@ export const getMobileProfile = async (req, res, next) => {
             role,
             profilePhoto: profilePhoto,
           },
-          entityType: "student",
+          entityType: isParent ? "parent" : "student",
           header: {
-            displayName: student.name || req.user.name,
+            displayName: isParent ? req.user.name : student.name || req.user.name,
             subTitle:
-              student.admissionNumber || req.user.username || req.user.phone || "",
+              (isParent
+                ? req.user.phone || req.user.username || req.user.email
+                : student.admissionNumber || req.user.username || req.user.phone || "") || "",
             profilePhoto,
           },
           academicDetails: {
-            school: school?.name || "",
-            schoolCode: school?.schoolCode || "",
-            className: student.className || "",
-            section: student.section || "",
-            rollNumber: student.rollNumber || "",
-            admissionNumber: student.admissionNumber || "",
+            school: school?.name || null,
+            schoolCode: school?.schoolCode || null,
+            className: student.className || null,
+            section: student.section || null,
+            rollNumber: student.rollNumber || null,
+            admissionNumber: student.admissionNumber || null,
             admissionDate: toISODateOnly(student.admissionDate),
             dateOfBirth: toISODateOnly(student.dob),
           },
           generalInformation: {
-            phone: student.phone || req.user.phone || "",
-            gender: student.gender || "",
-            bloodGroup: "", // not stored in schema yet
-            currentAddress: student.address || "",
-            permanentAddress: "",
+            phone: (isParent ? req.user.phone : student.phone || req.user.phone) || null,
+            gender: student.gender || null,
+            bloodGroup: null, // not stored in schema yet
+            currentAddress: student.address || null,
+            permanentAddress: null,
           },
           emergencyContact: {
-            contactName: fatherName,
-            contactRelation: fatherName ? "Father" : "",
-            contactPhone: fatherPhone,
+            contactName: fatherName || motherName || null,
+            contactRelation: fatherPhone ? "Father" : motherPhone ? "Mother" : null,
+            contactPhone: emergencyNumber || null,
+            fatherPhone: fatherPhone || null,
+            motherPhone: motherPhone || null,
           },
+          ...(isParent ? { parentDetails: parentProfileDetails } : {}),
         },
       });
     }
@@ -108,6 +132,8 @@ export const getMobileProfile = async (req, res, next) => {
         .select("name schoolCode")
         .lean();
 
+      const profilePhoto = staff?.photoUrl || null;
+
       return res.json({
         success: true,
         data: {
@@ -115,13 +141,13 @@ export const getMobileProfile = async (req, res, next) => {
             _id: req.user._id,
             name: req.user.name,
             role,
-            profilePhoto: null,
+            profilePhoto,
           },
           entityType: "staff",
           header: {
             displayName: staff.name || req.user.name,
             subTitle: req.user.email || req.user.phone || "",
-            profilePhoto: null,
+            profilePhoto,
           },
           academicDetails: {
             school: school?.name || "",
@@ -131,8 +157,11 @@ export const getMobileProfile = async (req, res, next) => {
             staffId: String(staff._id),
           },
           generalInformation: {
+            name: staff.name || req.user.name || "",
             phone: staff.phone || req.user.phone || "",
             email: staff.email || req.user.email || "",
+            gender: "",
+            dateOfBirth: null,
             status: staff.status || "",
             currentAddress: "", // not stored in schema yet
             permanentAddress: "", // not stored in schema yet

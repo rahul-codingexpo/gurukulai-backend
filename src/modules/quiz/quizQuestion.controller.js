@@ -10,6 +10,35 @@ const fail = (res, status, message, errors = undefined) =>
     ...(errors ? { errors } : {}),
   });
 
+const resolveStudentContextForMobileQuiz = async (req) => {
+  const roleName = req.user?.roleId?.name;
+  if (!["Student", "Parent"].includes(roleName)) {
+    const err = new Error("Quizzes are available for Student and Parent only");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const Student = (await import("../student/student.model.js")).default;
+  let studentDoc;
+  if (roleName === "Student") {
+    studentDoc = await Student.findOne({
+      "studentLogin.userId": req.user._id,
+    }).select("schoolId className");
+  } else {
+    studentDoc = await Student.findOne({
+      "parentLogin.userId": req.user._id,
+    }).select("schoolId className");
+  }
+
+  if (!studentDoc) {
+    const err = new Error("Student profile not found for this user");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  return studentDoc;
+};
+
 const mapBodyToQuestion = (body, userIdFallback) => {
   const {
     schoolId,
@@ -337,31 +366,7 @@ export const deleteQuestion = async (req, res, next) => {
 
 export const listMobileQuizzes = async (req, res, next) => {
   try {
-    const roleName = req.user?.roleId?.name;
-    if (!["Student", "Parent"].includes(roleName)) {
-      return fail(res, 403, "Quizzes are available for Student and Parent only");
-    }
-
-    const Student = (await import("../student/student.model.js")).default;
-
-    let studentDoc;
-    if (roleName === "Student") {
-      studentDoc = await Student.findOne({
-        "studentLogin.userId": req.user._id,
-      }).select("schoolId className");
-    } else if (roleName === "Parent") {
-      studentDoc = await Student.findOne({
-        "parentLogin.userId": req.user._id,
-      }).select("schoolId className");
-    }
-
-    if (!studentDoc) {
-      return fail(
-        res,
-        404,
-        "Student profile not found for this user",
-      );
-    }
+    const studentDoc = await resolveStudentContextForMobileQuiz(req);
 
     const subjectFilter = req.query.subject;
 
@@ -394,16 +399,131 @@ export const listMobileQuizzes = async (req, res, next) => {
 
     return ok(res, { data: quizzes });
   } catch (err) {
+    if (err.statusCode) return fail(res, err.statusCode, err.message);
+    next(err);
+  }
+};
+
+/** GET /api/mobile/quiz/subjects */
+export const listMobileQuizSubjects = async (req, res, next) => {
+  try {
+    const studentDoc = await resolveStudentContextForMobileQuiz(req);
+
+    const subjects = await QuizQuestion.aggregate([
+      {
+        $match: {
+          schoolId: studentDoc.schoolId,
+          class: studentDoc.className,
+          isActive: true,
+        },
+      },
+      {
+        $group: {
+          _id: "$subject",
+          subject: { $first: "$subject" },
+          topicsCount: { $addToSet: "$quizTitle" },
+          questionsCount: { $sum: 1 },
+          totalMarks: { $sum: "$marks" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          subject: 1,
+          topicsAvailable: { $size: "$topicsCount" },
+          questionsCount: 1,
+          totalMarks: 1,
+        },
+      },
+      { $sort: { subject: 1 } },
+    ]);
+
+    return ok(res, { data: subjects });
+  } catch (err) {
+    if (err.statusCode) return fail(res, err.statusCode, err.message);
+    next(err);
+  }
+};
+
+/** GET /api/mobile/quiz/topics?subject=Biology */
+export const listMobileQuizTopicsBySubject = async (req, res, next) => {
+  try {
+    const studentDoc = await resolveStudentContextForMobileQuiz(req);
+    const { subject } = req.query;
+    if (!subject) {
+      return fail(res, 400, "subject query param is required");
+    }
+
+    const topics = await QuizQuestion.aggregate([
+      {
+        $match: {
+          schoolId: studentDoc.schoolId,
+          class: studentDoc.className,
+          subject: String(subject),
+          isActive: true,
+        },
+      },
+      {
+        $group: {
+          _id: "$quizTitle",
+          quizTitle: { $first: "$quizTitle" },
+          subject: { $first: "$subject" },
+          class: { $first: "$class" },
+          questionCount: { $sum: 1 },
+          totalMarks: { $sum: "$marks" },
+          // Optional description: first non-empty explanation from this topic, if any
+          descriptions: { $addToSet: "$explanation" },
+          difficultySet: { $addToSet: "$difficulty" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          quizTitle: 1,
+          subject: 1,
+          class: 1,
+          questionCount: 1,
+          totalMarks: 1,
+          description: {
+            $let: {
+              vars: {
+                filtered: {
+                  $filter: {
+                    input: "$descriptions",
+                    as: "d",
+                    cond: { $gt: [{ $strLenCP: { $ifNull: ["$$d", ""] } }, 0] },
+                  },
+                },
+              },
+              in: {
+                $ifNull: [{ $arrayElemAt: ["$$filtered", 0] }, null],
+              },
+            },
+          },
+          difficulty: {
+            $ifNull: [{ $arrayElemAt: ["$difficultySet", 0] }, "medium"],
+          },
+        },
+      },
+      { $sort: { quizTitle: 1 } },
+    ]);
+
+    return ok(res, {
+      data: {
+        subject: String(subject),
+        class: studentDoc.className,
+        topics,
+      },
+    });
+  } catch (err) {
+    if (err.statusCode) return fail(res, err.statusCode, err.message);
     next(err);
   }
 };
 
 export const getMobileQuizQuestions = async (req, res, next) => {
   try {
-    const roleName = req.user?.roleId?.name;
-    if (!["Student", "Parent"].includes(roleName)) {
-      return fail(res, 403, "Quizzes are available for Student and Parent only");
-    }
+    await resolveStudentContextForMobileQuiz(req);
 
     const { quizTitle, subject } = req.query;
 
@@ -415,26 +535,7 @@ export const getMobileQuizQuestions = async (req, res, next) => {
       );
     }
 
-    const Student = (await import("../student/student.model.js")).default;
-
-    let studentDoc;
-    if (roleName === "Student") {
-      studentDoc = await Student.findOne({
-        "studentLogin.userId": req.user._id,
-      }).select("schoolId className");
-    } else if (roleName === "Parent") {
-      studentDoc = await Student.findOne({
-        "parentLogin.userId": req.user._id,
-      }).select("schoolId className");
-    }
-
-    if (!studentDoc) {
-      return fail(
-        res,
-        404,
-        "Student profile not found for this user",
-      );
-    }
+    const studentDoc = await resolveStudentContextForMobileQuiz(req);
 
     const questions = await QuizQuestion.find({
       schoolId: studentDoc.schoolId,
@@ -464,17 +565,13 @@ export const getMobileQuizQuestions = async (req, res, next) => {
       },
     });
   } catch (err) {
+    if (err.statusCode) return fail(res, err.statusCode, err.message);
     next(err);
   }
 };
 
 export const submitMobileQuiz = async (req, res, next) => {
   try {
-    const roleName = req.user?.roleId?.name;
-    if (!["Student", "Parent"].includes(roleName)) {
-      return fail(res, 403, "Quizzes are available for Student and Parent only");
-    }
-
     const { quizTitle, subject, answers } = req.body;
 
     if (!quizTitle || !subject || !Array.isArray(answers)) {
@@ -485,26 +582,7 @@ export const submitMobileQuiz = async (req, res, next) => {
       );
     }
 
-    const Student = (await import("../student/student.model.js")).default;
-
-    let studentDoc;
-    if (roleName === "Student") {
-      studentDoc = await Student.findOne({
-        "studentLogin.userId": req.user._id,
-      }).select("schoolId className");
-    } else if (roleName === "Parent") {
-      studentDoc = await Student.findOne({
-        "parentLogin.userId": req.user._id,
-      }).select("schoolId className");
-    }
-
-    if (!studentDoc) {
-      return fail(
-        res,
-        404,
-        "Student profile not found for this user",
-      );
-    }
+    const studentDoc = await resolveStudentContextForMobileQuiz(req);
 
     const questions = await QuizQuestion.find({
       schoolId: studentDoc.schoolId,
@@ -517,10 +595,6 @@ export const submitMobileQuiz = async (req, res, next) => {
     if (!questions.length) {
       return fail(res, 404, "No questions found for this quiz");
     }
-
-    const byId = new Map(
-      questions.map((q) => [String(q._id), q]),
-    );
 
     let totalMarks = 0;
     let obtainedMarks = 0;
@@ -563,6 +637,7 @@ export const submitMobileQuiz = async (req, res, next) => {
       },
     });
   } catch (err) {
+    if (err.statusCode) return fail(res, err.statusCode, err.message);
     next(err);
   }
 };

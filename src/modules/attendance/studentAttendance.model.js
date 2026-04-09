@@ -27,6 +27,13 @@ const studentAttendanceSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Optional display status for mobile teacher marking flow
+    markType: {
+      type: String,
+      enum: ["Present", "Absent", "Late"],
+      default: undefined,
+    },
+
     markedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

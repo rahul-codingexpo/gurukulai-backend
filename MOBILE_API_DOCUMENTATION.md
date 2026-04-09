@@ -1,10 +1,17 @@
 # GurukulAI Backend – Mobile API Documentation
 
-**Base URL:** `http://localhost:5000/api`  
+**Base URL:** `http://localhost:5000/api`
+**render api**
+**Base URL:** `
 **Auth header (protected APIs):** `Authorization: Bearer <token>`
 
 This document is focused on **mobile app usage** (Student/Parent/Teacher login → Dashboard).
 All `/api/mobile/*` endpoints are restricted to these roles only: `Student`, `Parent`, `Teacher`, `Staff`.
+
+### API boundary (Mobile vs Web)
+- **Mobile APIs:** Prefer `/api/mobile/*` endpoints for app screens.
+- **Shared auth endpoint for mobile login:** `POST /api/auth/login` (used by both web and mobile clients).
+- **Web-first APIs:** `/api/events`, `/api/homework`, `/api/gallery` etc. are primarily for web/admin workflows unless explicitly called from mobile.
 
 ### Default password (Student/Parent)
 When Student/Parent accounts are created during admission (or bulk admission), the backend can auto-set a default password.
@@ -72,11 +79,49 @@ or
       "email": "student.adm1002@local.invalid",
       "username": "ADM1002",
       "roleId": { "name": "Student" },
-      "schoolId": "SCHOOL_ID"
+      "schoolId": "SCHOOL_ID",
+      "profilePhoto": "/uploads/student-photo.png",
+      "profileDetails": {
+        "displayName": "Rahul Sharma",
+        "admissionNumber": "ADM1002",
+        "className": "7",
+        "section": "A",
+        "rollNumber": "31"
+      }
     }
   }
 }
 ```
+
+**Success (200) – Teacher example:**
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "token": "JWT_TOKEN_HERE",
+    "user": {
+      "_id": "USER_ID",
+      "name": "Ramesh Kumar",
+      "email": "teacher@school.com",
+      "roleId": { "name": "Teacher" },
+      "schoolId": "SCHOOL_ID",
+      "profilePhoto": "/uploads/staff-photo.png",
+      "profileDetails": {
+        "displayName": "Ramesh Kumar",
+        "designation": "Teacher",
+        "staffId": "STAFF_ID"
+      }
+    }
+  }
+}
+```
+
+**Role-wise login response notes (mobile):**
+- Student: `profilePhoto` from `Student.documents.studentPhoto`, plus `admissionNumber/className/section/rollNumber`.
+- Parent: `profilePhoto` from linked child `Student.documents.studentPhoto`, plus `childName/admissionNumber/className/section/rollNumber` and parent contact fields.
+- Teacher: `profilePhoto` from `Staff.photoUrl`, plus `designation/staffId`.
+- Staff/others: login still works; role-specific `profilePhoto/profileDetails` may be empty if not mapped.
 
 **Common errors:**
 - **400** missing JSON/body fields  
@@ -184,10 +229,94 @@ Note: OTP is returned for testing in non-production (or if `RETURN_RESET_OTP=tru
   - Staff → `STAFF`
   - Others → `ALL`
 - Only **UPCOMING** and **ONGOING** events are returned (max 10).
-- `profilePhoto` is currently:
+- `profilePhoto` is role-based:
   - Student → `Student.documents.studentPhoto` (if present)
   - Parent → child student’s `studentPhoto` (fallback)
-  - Teacher → `null` (no photo field exists in current schema)
+  - Teacher/Staff → `Staff.photoUrl` (if present)
+
+### 2.1.1 Teacher Combined Dashboard (single API for home screen)
+**GET** `/api/mobile/dashboard/teacher`  
+**Auth:** Teacher token only
+
+Use this endpoint for the exact teacher home screen blocks:
+- Header (`name`, `profilePhoto`)
+- Quick actions (mark attendance, student attendance, add homework, apply leave)
+- Today timetable card (first 4 slots + `hasMore`/`moreCount`)
+- Recent announcements (top 4)
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "_id": "USER_ID",
+      "name": "Ramesh Kumar",
+      "role": "Teacher",
+      "profilePhoto": "/uploads/staff_photo.png"
+    },
+    "quickActions": [
+      {
+        "key": "markAttendance",
+        "label": "Mark Attendance",
+        "endpoint": "/api/mobile/attendance/teacher/mark-students"
+      },
+      {
+        "key": "studentAttendance",
+        "label": "Student Attendance",
+        "endpoint": "/api/mobile/attendance/teacher/students"
+      },
+      {
+        "key": "addHomework",
+        "label": "Add Homework",
+        "endpoint": "/api/mobile/homework"
+      },
+      {
+        "key": "applyLeave",
+        "label": "Apply Leave",
+        "endpoint": "/api/mobile/leaves/staff/me/apply"
+      }
+    ],
+    "todayTimetable": {
+      "selectedDay": "Tue",
+      "fullDay": "Tuesday",
+      "total": 7,
+      "slots": [
+        {
+          "_id": "TIMETABLE_ID",
+          "subject": "Mathematics",
+          "subjectCode": "MATH",
+          "className": "Grade 1",
+          "section": "A",
+          "startTime": "09:00",
+          "endTime": "09:30",
+          "periodNumber": 1,
+          "isNow": true
+        }
+      ],
+      "hasMore": true,
+      "moreCount": 3
+    },
+    "announcements": [
+      {
+        "_id": "EVENT_ID",
+        "title": "Spring Break Schedule",
+        "description": "The updated schedule for the upcoming spring break...",
+        "location": "",
+        "startAt": "2026-04-10T00:00:00.000Z",
+        "endAt": "2026-04-20T00:00:00.000Z",
+        "organizationFor": ["TEACHERS"],
+        "status": "UPCOMING"
+      }
+    ]
+  }
+}
+```
+
+**Error (403):**
+```json
+{ "success": false, "message": "Only Teacher can access this endpoint" }
+```
 
 ---
 
@@ -196,9 +325,11 @@ Note: OTP is returned for testing in non-production (or if `RETURN_RESET_OTP=tru
 **Auth:** Required
 
 **Response notes:**
-- `entityType` is `student` for Student/Parent users (Parent sees child student profile data).
+- `entityType` is `student` for Student users.
+- `entityType` is `parent` for Parent users.
 - `entityType` is `staff` for Teacher/Staff users.
-- Some screenshot fields like address/blood group are returned as empty strings because they don’t exist in current DB schema.
+- Some fields like blood group/address/dateOfBirth for Teacher are returned empty because they are not stored in current staff schema.
+- For Parent profile, backend returns available fields and `null` for missing values so frontend can render safely.
 
 **Success (200) – Student/Parent example:**
 ```json
@@ -231,7 +362,79 @@ Note: OTP is returned for testing in non-production (or if `RETURN_RESET_OTP=tru
     "emergencyContact": {
       "contactName": "Mr. Rajesh Sharma",
       "contactRelation": "Father",
-      "contactPhone": "+91 9229739229"
+      "contactPhone": "+91 9229739229",
+      "fatherPhone": "+91 9229739229",
+      "motherPhone": "+91 9111111111"
+    }
+  }
+}
+```
+
+**Success (200) – Teacher/Staff example:**
+```json
+{
+  "success": true,
+  "data": {
+    "entityType": "staff",
+    "header": {
+      "displayName": "Ramesh Kumar",
+      "subTitle": "teacher@school.com",
+      "profilePhoto": "/uploads/staff_photo.png"
+    },
+    "academicDetails": {
+      "school": "Crestwood Academy",
+      "schoolCode": "SCH202423",
+      "designation": "Teacher",
+      "joiningDate": "2024-06-10",
+      "staffId": "STAFF_ID"
+    },
+    "generalInformation": {
+      "name": "Ramesh Kumar",
+      "phone": "9999999999",
+      "email": "teacher@school.com",
+      "gender": "",
+      "dateOfBirth": null,
+      "status": "ACTIVE",
+      "currentAddress": "",
+      "permanentAddress": ""
+    }
+  }
+}
+```
+
+**Success (200) – Parent example:**
+```json
+{
+  "success": true,
+  "data": {
+    "entityType": "parent",
+    "header": {
+      "displayName": "Mrs. Sharma",
+      "subTitle": "9999999999",
+      "profilePhoto": "/uploads/student_photo.png"
+    },
+    "academicDetails": {
+      "school": "Crestwood Academy",
+      "className": "7",
+      "section": "A",
+      "rollNumber": "31",
+      "admissionNumber": "ADM-102",
+      "dateOfBirth": "2006-11-22"
+    },
+    "parentDetails": {
+      "name": "Mrs. Sharma",
+      "phone": "9999999999",
+      "email": null,
+      "relation": "Parent",
+      "childName": "Ambika Sharma",
+      "childAdmissionNumber": "ADM-102",
+      "childClassName": "7",
+      "childSection": "A",
+      "childRollNumber": "31"
+    },
+    "emergencyContact": {
+      "fatherPhone": "+91 9229739229",
+      "motherPhone": "+91 9111111111"
     }
   }
 }
@@ -414,10 +617,10 @@ For students: **ignore entry/exit time** (not returned).
 
 ---
 
-### 5.3 Teacher – Get students list by class (and optional section)
-Teacher selects class first → gets all students list to mark.
+### 5.3 Teacher – Get class/section list for attendance dropdown
+Use this first when teacher opens Student Attendance screen and needs class picker options.
 
-**GET** `/api/mobile/attendance/teacher/students?className=5&section=A`  
+**GET** `/api/mobile/attendance/teacher/classes`  
 **Auth:** Teacher token
 
 **Success (200):**
@@ -425,22 +628,54 @@ Teacher selects class first → gets all students list to mark.
 {
   "success": true,
   "data": [
-    {
-      "_id": "STUDENT_ID",
-      "name": "Rahul Sharma",
-      "admissionNumber": "ADM1002",
-      "rollNumber": "12",
-      "className": "5",
-      "section": "A"
-    }
+    { "className": "1", "section": "A", "studentCount": 28 },
+    { "className": "1", "section": "B", "studentCount": 31 }
   ]
 }
 ```
 
 ---
 
-### 5.4 Teacher – Mark attendance by date (single or bulk)
-Teacher can mark **one-by-one** (send one entry) or **bulk** (send many entries).
+### 5.4 Teacher – Get students list with attendance status by class/date
+Teacher selects class/date and receives students with current status (`Present`, `Absent`, `Late`, or `null` for pending), plus top counters.
+
+**GET** `/api/mobile/attendance/teacher/students?className=1&section=A&date=2026-03-13&filter=all&search=`  
+**Auth:** Teacher token
+
+- `filter`: `all` | `present` | `absent` | `late` | `pending`
+- `search` (optional): name search text
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "className": "1",
+    "section": "A",
+    "date": "2026-03-13T00:00:00.000Z",
+    "dateLabel": "13 MAR",
+    "summary": { "present": 8, "absent": 1, "late": 1, "pending": 20, "total": 30 },
+    "students": [
+      {
+        "_id": "STUDENT_ID",
+        "name": "Aarav Sharma",
+        "rollNumber": "101",
+        "admissionNumber": "ADM1002",
+        "className": "1",
+        "section": "A",
+        "status": "Present",
+        "markedAt": "2026-03-13T03:15:00.000Z",
+        "markedTime": "8:45 AM"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 5.5 Teacher – Submit student attendance (single or bulk)
+Teacher can mark one-by-one (single entry) or submit full list (bulk).
 
 **POST** `/api/mobile/attendance/teacher/mark-students`  
 **Content-Type:** `application/json`
@@ -451,8 +686,118 @@ Teacher can mark **one-by-one** (send one entry) or **bulk** (send many entries)
   "date": "2025-11-17",
   "entries": [
     { "studentId": "STUDENT_ID_1", "status": "Present" },
-    { "studentId": "STUDENT_ID_2", "status": "Absent" }
+    { "studentId": "STUDENT_ID_2", "status": "Absent" },
+    { "studentId": "STUDENT_ID_3", "status": "Late" }
   ]
+}
+```
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "message": "Student attendance submitted successfully",
+  "data": {
+    "summary": { "present": 8, "absent": 1, "late": 1, "totalMarked": 10 },
+    "records": [
+      {
+        "_id": "ATTENDANCE_ID",
+        "studentId": "STUDENT_ID_1",
+        "name": "Aarav Sharma",
+        "rollNumber": "101",
+        "className": "1",
+        "section": "A",
+        "status": "Present",
+        "markedBy": "Ramesh Kumar"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 5.6 Teacher – Mark self attendance (from dashboard icon)
+This is the API for the exact mobile flow in your screenshot where teacher marks their own attendance.
+
+**POST** `/api/mobile/attendance/teacher/self`  
+**Auth:** Teacher token  
+**Content-Type:** `application/json`
+
+**Request (JSON):**
+```json
+{
+  "date": "2026-03-13",
+  "status": "Present"
+}
+```
+
+- `status` supports: `Present`, `Absent`, `Late`
+- `date` is optional; if not sent, server uses today
+- Optional: `entryTime`, `exitTime`
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "message": "Attendance marked successfully",
+  "data": {
+    "_id": "ATTENDANCE_ID",
+    "date": "2026-03-13T00:00:00.000Z",
+    "status": "Present",
+    "markType": "Late",
+    "checkIn": "08:10",
+    "checkOut": null
+  }
+}
+```
+
+---
+
+### 5.7 Teacher – Self attendance month history (cards list)
+Use this for the list screen with All / Present / Absent / Late tabs and summary counters.
+
+**GET** `/api/mobile/attendance/teacher/self?month=11&year=2026&filter=all`  
+**Auth:** Teacher token
+
+- `filter`: `all` | `present` | `absent` | `late` (default `all`)
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "teacher": {
+      "_id": "STAFF_ID",
+      "name": "Ramesh Kumar",
+      "designation": "Teacher"
+    },
+    "summary": {
+      "present": 20,
+      "absent": 2,
+      "late": 1,
+      "pending": 7,
+      "totalMarked": 23
+    },
+    "days": [
+      {
+        "_id": "ATTENDANCE_ID",
+        "date": "2026-11-17T00:00:00.000Z",
+        "markType": "Present",
+        "status": "Present",
+        "checkIn": "08:10",
+        "checkOut": "14:10"
+      },
+      {
+        "_id": "ATTENDANCE_ID_2",
+        "date": "2026-11-14T00:00:00.000Z",
+        "markType": "Absent",
+        "status": "Absent",
+        "checkIn": null,
+        "checkOut": null
+      }
+    ]
+  }
 }
 ```
 
@@ -795,7 +1140,77 @@ Returns students filtered by exam scope:
 
 Mobile quiz APIs are read-only and per-play only – they **do not** store quiz attempts in DB (score is computed on the fly from questions).
 
-### 9.1 List quizzes for logged-in student/parent
+### 9.1 Subject list screen (first quiz screen)
+Use this for subject cards like Biology / Mathematics.
+
+**GET** `/api/mobile/quiz/subjects`  
+**Auth:** Student / Parent
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "subject": "Biology",
+      "topicsAvailable": 4,
+      "questionsCount": 32,
+      "totalMarks": 32
+    },
+    {
+      "subject": "Mathematics",
+      "topicsAvailable": 3,
+      "questionsCount": 24,
+      "totalMarks": 24
+    }
+  ]
+}
+```
+
+---
+
+### 9.2 Topic list by subject (second screen)
+When user clicks a subject, show topic list.  
+Topic name comes from backend `quizTitle`. Description is optional and may be `null`.
+
+**GET** `/api/mobile/quiz/topics?subject=Biology`  
+**Auth:** Student / Parent
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "subject": "Biology",
+    "class": "8",
+    "topics": [
+      {
+        "quizTitle": "Cell Structure",
+        "subject": "Biology",
+        "class": "8",
+        "questionCount": 12,
+        "totalMarks": 12,
+        "description": "Learn about the basics of cell life",
+        "difficulty": "easy"
+      },
+      {
+        "quizTitle": "Genetics",
+        "subject": "Biology",
+        "class": "8",
+        "questionCount": 10,
+        "totalMarks": 10,
+        "description": null,
+        "difficulty": "hard"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 9.3 (Optional) List quizzes for logged-in student/parent
+This old endpoint is still available and groups by quizTitle + subject.
 
 **GET** `/api/mobile/quiz/quizzes`  
 **Auth:** Student / Parent
@@ -827,7 +1242,7 @@ Uses the linked student’s `schoolId` and `className` to discover available qui
 
 ---
 
-### 9.2 Get questions for a quiz (play screen)
+### 9.4 Get questions for a topic (play screen)
 
 **GET** `/api/mobile/quiz/quizzes/questions?quizTitle=&subject=`  
 **Auth:** Student / Parent
@@ -867,7 +1282,7 @@ Uses the linked student’s `schoolId` and `className` to discover available qui
 
 ---
 
-### 9.3 Submit quiz answers (compute score)
+### 9.5 Submit quiz answers (compute score + report/solutions)
 
 **POST** `/api/mobile/quiz/quizzes/submit`  
 **Auth:** Student / Parent  
@@ -1095,6 +1510,8 @@ Uses the linked student’s `schoolId` and `className` to discover available qui
 
 - **Apply (self)**: `POST /api/mobile/leaves/staff/me/apply`
 - **My list**: `GET /api/mobile/leaves/staff/me?status=Approved|Unapproved`
+- **Dashboard list + summary (teacher UI flow)**: `GET /api/mobile/leaves/staff/me/dashboard`
+- **Single leave details (popup)**: `GET /api/mobile/leaves/staff/me/:id`
 - **Update my leave**: `PUT /api/mobile/leaves/staff/me/:id`
 - **Delete my leave**: `DELETE /api/mobile/leaves/staff/me/:id`
 - **Pending list (approver)**: `GET /api/mobile/leaves/staff/pending`
@@ -1106,6 +1523,95 @@ Uses the linked student’s `schoolId` and `className` to discover available qui
   "reason": "Personal work",
   "leaveFrom": "2026-03-28",
   "leaveTo": "2026-03-28"
+}
+```
+
+**Teacher UI apply request (mobile form):**
+```json
+{
+  "leaveType": "Casual Leave",
+  "leaveFrom": "2026-03-13",
+  "leaveTo": "2026-03-14",
+  "reason": "Family function",
+  "emergencyContactName": "Rahul Sharma",
+  "emergencyContactPhone": "+91 9876543210"
+}
+```
+
+**Teacher UI apply success:**
+```json
+{
+  "success": true,
+  "message": "Leave application submitted successfully",
+  "data": {
+    "_id": "LEAVE_ID",
+    "leaveType": "Casual Leave",
+    "durationDays": 2,
+    "status": "Pending Approval",
+    "leaveFrom": "2026-03-13T00:00:00.000Z",
+    "leaveTo": "2026-03-14T00:00:00.000Z"
+  }
+}
+```
+
+**Teacher dashboard list response (summary + cards):**
+```json
+{
+  "success": true,
+  "data": {
+    "leaveBalance": { "casualLeave": null, "sickLeave": null },
+    "summary": {
+      "totalApplied": 8,
+      "daysTaken": 8,
+      "approved": 5,
+      "pending": 2,
+      "rejected": 1
+    },
+    "items": [
+      {
+        "_id": "LEAVE_ID",
+        "leaveType": "Sick Leave",
+        "status": "approved",
+        "statusLabel": "Approved",
+        "appliedDate": "2026-04-08T00:00:00.000Z",
+        "leaveFrom": "2026-04-10T00:00:00.000Z",
+        "leaveTo": "2026-04-12T00:00:00.000Z",
+        "durationDays": 3,
+        "reason": "Suffering from viral fever",
+        "approvedByName": "Dr. Sharma",
+        "approvedAt": "2026-04-09T00:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+**Teacher popup leave details response:**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "LEAVE_ID",
+    "applicationId": "#ABC123",
+    "leaveType": "Sick Leave",
+    "status": "approved",
+    "statusLabel": "Approved",
+    "appliedOn": "2026-04-08T00:00:00.000Z",
+    "leaveFrom": "2026-04-10T00:00:00.000Z",
+    "leaveTo": "2026-04-12T00:00:00.000Z",
+    "durationDays": 3,
+    "reason": "Suffering from viral fever",
+    "contactInformation": {
+      "contactNumber": "+91 9876543210",
+      "emergencyContact": "+91 9876543210",
+      "emergencyContactName": "Rahul Sharma"
+    },
+    "approval": {
+      "approved": true,
+      "approvedBy": "Dr. Sharma",
+      "approvedAt": "2026-04-09T00:00:00.000Z"
+    }
+  }
 }
 ```
 
@@ -1147,6 +1653,7 @@ Homework may include optional **`topic`** (e.g. chapter label: “Division”) a
 
 **Query:**
 - `subjectId` (optional) — filter by subject (same as subject chips on “All Homework”)
+- `subject` (optional) — filter by subject name (e.g. `Mathematics`) for mobile chips
 - `filter` (optional) — `pending` (not due yet, not submitted), `overdue` (past `dueDate`, not submitted), `submitted` or `completed` (has submission), or omit for all
 
 **Success (200):**
@@ -1196,11 +1703,58 @@ Each item includes:
 }
 ```
 
+### 10.1.1 List homework subjects for chip tabs
+**GET** `/api/mobile/homework/subjects`  
+**Auth:** Student or Parent
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "subjectId": "SUBJECT_ID",
+      "subjectName": "Mathematics",
+      "subjectCode": "MATH",
+      "totalHomework": 7
+    }
+  ]
+}
+```
+
 ### 10.2 List homework — Teacher (assignments I created)
-**GET** `/api/mobile/homework?classId=&sectionId=&subjectId=`  
+**GET** `/api/mobile/homework?classId=&sectionId=&subjectId=&search=&status=`  
 **Auth:** Teacher
 
-Optional filters match the web model (`ObjectId` strings).
+Optional filters:
+- `classId`, `sectionId`, `subjectId` (ObjectId)
+- `search` (by title text)
+- `status` = `ACTIVE` | `COMPLETED` | `OVERDUE`
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "summary": { "active": 4, "completed": 1, "overdue": 1 },
+  "data": [
+    {
+      "_id": "HOMEWORK_ID",
+      "title": "Chapter 5: Multiplication Tables",
+      "description": "Complete exercises 5.1 to 5.5 from textbook",
+      "subjectName": "Mathematics",
+      "subjectCode": "MATH",
+      "className": "Grade 1",
+      "section": "A",
+      "assignedDate": "2026-03-05T00:00:00.000Z",
+      "dueDate": "2026-04-10T00:00:00.000Z",
+      "status": "ACTIVE",
+      "statusLabel": "Active",
+      "submissionStats": { "submitted": 18, "totalStudents": 30, "percentage": 60 },
+      "attachmentsCount": 2
+    }
+  ]
+}
+```
 
 ### 10.3 Homework detail
 **GET** `/api/mobile/homework/:id`  
@@ -1213,7 +1767,34 @@ Optional filters match the web model (`ObjectId` strings).
 
 Use `dueDate` on the client for “Due date” + “Due time” (ISO string). If `maxScore` is `null`, hide or show “—” for points.
 
-**Teacher** — raw homework document with populated refs (unchanged).
+**Teacher** — popup-friendly detail payload:
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "HOMEWORK_ID",
+    "subjectName": "Mathematics",
+    "className": "Grade 1",
+    "section": "A",
+    "title": "Chapter 5: Multiplication Tables",
+    "description": "Complete exercises 5.1 to 5.5 from textbook",
+    "assignedDate": "2026-04-03T00:00:00.000Z",
+    "dueDate": "2026-04-10T00:00:00.000Z",
+    "submissionStatus": { "submitted": 18, "totalStudents": 30, "percentage": 60 },
+    "attachedDocuments": [
+      {
+        "id": "/uploads/hw1.pdf",
+        "type": "file",
+        "url": "/uploads/hw1.pdf",
+        "fileName": "hw1.pdf",
+        "mimeType": "application/pdf",
+        "kind": "pdf",
+        "sizeBytes": 2516582
+      }
+    ]
+  }
+}
+```
 
 ### 10.4 Teacher — Assign homework
 **POST** `/api/mobile/homework`  
@@ -1258,4 +1839,31 @@ At least one of **note** (non-empty) or **files** is required on first submit. U
 ```
 
 **Base URL for files:** prepend your API host to paths like `/uploads/...` (same as other modules).
+
+### 10.7 Student / Parent — Ask teacher a question (from homework detail)
+**POST** `/api/mobile/homework/:id/questions`  
+**Auth:** Student or Parent  
+**Content-Type:** `application/json`
+
+**Request body:**
+```json
+{
+  "question": "Ma'am, should we solve only Exercise 5.1 and 5.2 or all?"
+}
+```
+
+**Success (201):**
+```json
+{
+  "success": true,
+  "message": "Question sent to teacher",
+  "data": {
+    "_id": "QUESTION_ID",
+    "homeworkId": "HOMEWORK_ID",
+    "question": "Ma'am, should we solve only Exercise 5.1 and 5.2 or all?",
+    "status": "OPEN",
+    "createdAt": "2026-04-09T13:15:00.000Z"
+  }
+}
+```
 
