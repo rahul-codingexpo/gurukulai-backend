@@ -228,11 +228,11 @@ export const getTeacherStudentsForMarking = async (req, res, next) => {
       });
     }
 
-    const filter = { schoolId, className: String(className).trim() };
-    if (section) filter.section = String(section).trim();
-    if (search) filter.name = { $regex: String(search).trim(), $options: "i" };
+    const studentQuery = { schoolId, className: String(className).trim() };
+    if (section) studentQuery.section = String(section).trim();
+    if (search) studentQuery.name = { $regex: String(search).trim(), $options: "i" };
 
-    const students = await Student.find(filter)
+    const students = await Student.find(studentQuery)
       .select("_id name admissionNumber rollNumber className section")
       .sort({ section: 1, rollNumber: 1, name: 1 })
       .lean();
