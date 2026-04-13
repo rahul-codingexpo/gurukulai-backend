@@ -1,4 +1,5 @@
 import School from "./school.model.js";
+import mongoose from "mongoose";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
@@ -22,9 +23,14 @@ import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 export const createSchool = async (req, res, next) => {
   try {
     let logoPath = null;
+    const logoFile =
+      req.files?.logo?.[0] ||
+      req.files?.schoolLogo?.[0] ||
+      req.file ||
+      null;
 
-    if (req.file) {
-      logoPath = uploadedFileUrl(req.file);
+    if (logoFile) {
+      logoPath = uploadedFileUrl(logoFile);
     }
 
     const school = await School.create({
@@ -110,7 +116,10 @@ export const updateSchool = async (req, res, next) => {
     if (update.payment) delete update.payment;
 
     // Canonicalize QR code (accept file uploads aliases)
-    const logoFile = req.files?.logo?.[0] || null;
+    const logoFile =
+      req.files?.logo?.[0] ||
+      req.files?.schoolLogo?.[0] ||
+      null;
     const qrFile =
       req.files?.qrCode?.[0] ||
       req.files?.paymentQr?.[0] ||
@@ -156,7 +165,34 @@ export const updateSchool = async (req, res, next) => {
 
 export const deleteSchool = async (req, res, next) => {
   try {
-    await School.findByIdAndDelete(req.params.id);
+    const schoolId = req.params.id;
+    const school = await School.findById(schoolId);
+    if (!school) {
+      return res.status(404).json({
+        success: false,
+        message: "School not found",
+      });
+    }
+
+    const modelNames = mongoose.modelNames().filter((name) => name !== "School");
+
+    const deleteTasks = modelNames.map(async (name) => {
+      const Model = mongoose.model(name);
+      // Only cascade on models that actually store school ownership.
+      if (!Model.schema.path("schoolId")) return;
+      await Model.deleteMany({ schoolId });
+    });
+
+    await Promise.all(deleteTasks);
+    await School.deleteOne({ _id: schoolId });
+
+    if (school.logo) await deleteFromSpacesByUrl(school.logo);
+    if (school.qrCode) await deleteFromSpacesByUrl(school.qrCode);
+
+    return res.json({
+      success: true,
+      message: "School and related data deleted successfully",
+    });
   } catch (error) {
     next(error);
   }

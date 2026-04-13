@@ -13,7 +13,10 @@ const router = express.Router();
 router.post(
   "/",
   protect,
-  upload.single("logo"),
+  upload.fields([
+    { name: "logo", maxCount: 1 },
+    { name: "schoolLogo", maxCount: 1 },
+  ]),
   authorize("SuperAdmin"),
   createSchool,
 );
@@ -31,6 +34,7 @@ router.put(
   protect,
   upload.fields([
     { name: "logo", maxCount: 1 },
+    { name: "schoolLogo", maxCount: 1 },
     { name: "qrCode", maxCount: 1 },
     { name: "paymentQr", maxCount: 1 },
   ]),
