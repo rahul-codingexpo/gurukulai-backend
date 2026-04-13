@@ -1,7 +1,5 @@
 import express from "express";
-import multer from "multer";
-import path from "path";
-import fs from "fs";
+import { createSpacesUpload } from "../../middleware/spacesUpload.middleware.js";
 
 import {
   uploadTC,
@@ -18,26 +16,6 @@ import { authorize } from "../../middleware/role.middleware.js";
 
 const router = express.Router();
 
-const tcUploadDir = path.join(process.cwd(), "uploads", "tc");
-if (!fs.existsSync(tcUploadDir)) {
-  fs.mkdirSync(tcUploadDir, { recursive: true });
-}
-
-const sanitizeName = (name = "tc-file") =>
-  String(name)
-    .replace(/[^a-zA-Z0-9._-]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, tcUploadDir);
-  },
-  filename: function (req, file, cb) {
-    const safe = sanitizeName(file.originalname || "tc");
-    cb(null, `${Date.now()}_${safe}`);
-  },
-});
-
 const tcFileFilter = (req, file, cb) => {
   const allowed = [
     "application/pdf",
@@ -52,8 +30,8 @@ const tcFileFilter = (req, file, cb) => {
   return cb(err, false);
 };
 
-const uploadTcFile = multer({
-  storage,
+const uploadTcFile = createSpacesUpload({
+  folder: "uploads/tc",
   fileFilter: tcFileFilter,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB

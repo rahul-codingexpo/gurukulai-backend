@@ -1,4 +1,5 @@
 import Homework from "./homework.model.js";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -75,10 +76,10 @@ export const createHomework = async (req, res, next) => {
     const filePaths = [];
     if (req.files && req.files.files && Array.isArray(req.files.files)) {
       req.files.files.forEach((f) => {
-        filePaths.push(`/uploads/${f.filename}`);
+        filePaths.push(uploadedFileUrl(f));
       });
     } else if (req.files && req.files.files) {
-      filePaths.push(`/uploads/${req.files.files.filename}`);
+      filePaths.push(uploadedFileUrl(req.files.files));
     }
 
     const homework = await Homework.create({
@@ -243,8 +244,8 @@ export const updateHomework = async (req, res, next) => {
 
     if (req.files && req.files.files) {
       const newPaths = Array.isArray(req.files.files)
-        ? req.files.files.map((f) => `/uploads/${f.filename}`)
-        : [`/uploads/${req.files.files.filename}`];
+        ? req.files.files.map((f) => uploadedFileUrl(f))
+        : [uploadedFileUrl(req.files.files)];
       homework.files = [...(homework.files || []), ...newPaths];
     }
 

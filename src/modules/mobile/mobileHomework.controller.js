@@ -6,6 +6,7 @@ import HomeworkQuestion from "../homework/homeworkQuestion.model.js";
 import Student from "../student/student.model.js";
 import ClassModel from "../academic/class.model.js";
 import Section from "../academic/section.model.js";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 
@@ -722,10 +723,10 @@ export const createMobileHomework = async (req, res, next) => {
     const filePaths = [];
     if (req.files && req.files.files && Array.isArray(req.files.files)) {
       req.files.files.forEach((f) => {
-        filePaths.push(`/uploads/${f.filename}`);
+        filePaths.push(uploadedFileUrl(f));
       });
     } else if (req.files && req.files.files) {
-      filePaths.push(`/uploads/${req.files.files.filename}`);
+      filePaths.push(uploadedFileUrl(req.files.files));
     }
 
     const homework = await Homework.create({
@@ -823,8 +824,8 @@ export const updateMobileHomework = async (req, res, next) => {
 
     if (req.files && req.files.files) {
       const newPaths = Array.isArray(req.files.files)
-        ? req.files.files.map((f) => `/uploads/${f.filename}`)
-        : [`/uploads/${req.files.files.filename}`];
+        ? req.files.files.map((f) => uploadedFileUrl(f))
+        : [uploadedFileUrl(req.files.files)];
       homework.files = [...(homework.files || []), ...newPaths];
     }
 
@@ -899,10 +900,10 @@ const collectUploadedPaths = (req) => {
   const filePaths = [];
   if (req.files && req.files.files && Array.isArray(req.files.files)) {
     req.files.files.forEach((f) => {
-      filePaths.push(`/uploads/${f.filename}`);
+      filePaths.push(uploadedFileUrl(f));
     });
   } else if (req.files && req.files.files) {
-    filePaths.push(`/uploads/${req.files.files.filename}`);
+    filePaths.push(uploadedFileUrl(req.files.files));
   }
   return filePaths;
 };

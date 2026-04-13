@@ -1,19 +1,6 @@
 import multer from "multer";
 import path from "path";
-
-// storage config
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/");
-  },
-
-  filename: function (req, file, cb) {
-    const uniqueName =
-      Date.now() + "-" + file.originalname.replace(/\s+/g, "_");
-
-    cb(null, uniqueName);
-  },
-});
+import { createSpacesUpload } from "./spacesUpload.middleware.js";
 
 // file filter (only images)
 const fileFilter = (req, file, cb) => {
@@ -26,8 +13,8 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-const upload = multer({
-  storage,
+const upload = createSpacesUpload({
+  folder: "uploads",
   fileFilter,
 });
 
@@ -51,8 +38,8 @@ const studyMaterialFileFilter = (req, file, cb) => {
 
 const TEN_MB = 10 * 1024 * 1024;
 
-export const uploadStudyMaterials = multer({
-  storage,
+export const uploadStudyMaterials = createSpacesUpload({
+  folder: "uploads/study-materials",
   fileFilter: studyMaterialFileFilter,
   limits: { fileSize: TEN_MB },
 });
@@ -74,7 +61,7 @@ const excelFileFilter = (req, file, cb) => {
 };
 
 export const uploadExcel = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter: excelFileFilter,
 });
 
@@ -108,7 +95,7 @@ const quizFileFilter = (req, file, cb) => {
 };
 
 export const uploadQuizFile = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter: quizFileFilter,
 });
 
@@ -134,8 +121,8 @@ const staffDocumentsFileFilter = (req, file, cb) => {
   return cb(new Error("Invalid file type for staff documents"), false);
 };
 
-export const uploadStaffDocuments = multer({
-  storage,
+export const uploadStaffDocuments = createSpacesUpload({
+  folder: "uploads/staff",
   fileFilter: staffDocumentsFileFilter,
   limits: { fileSize: TEN_MB },
 });

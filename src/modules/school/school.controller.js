@@ -1,4 +1,5 @@
 import School from "./school.model.js";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 /**
  * Create School
@@ -22,7 +23,7 @@ export const createSchool = async (req, res, next) => {
     let logoPath = null;
 
     if (req.file) {
-      logoPath = `/uploads/${req.file.filename}`;
+      logoPath = uploadedFileUrl(req.file);
     }
 
     const school = await School.create({
@@ -106,8 +107,7 @@ export const updateSchool = async (req, res, next) => {
       req.file ||
       null;
     if (qrFile) {
-      // Keep consistent with how logo is stored: /uploads/<filename>
-      update.qrCode = `/uploads/${qrFile.filename}`;
+      update.qrCode = uploadedFileUrl(qrFile);
     }
     delete update.paymentQr;
 

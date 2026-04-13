@@ -1,15 +1,9 @@
-import fs from "fs";
-import path from "path";
-
 import Wallet from "./wallet.model.js";
 import WalletPayment from "./walletPayment.model.js";
 import Student from "../student/student.model.js";
 import School from "../school/school.model.js";
 import FeeInvoice from "../accounting/feeInvoice.model.js";
-
-const resolveSchoolId = (req) => {
-  return req.schoolId ?? req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
-};
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 const resolveStudentForSelf = async (req) => {
   const roleName = req.user?.roleId?.name;
@@ -136,7 +130,7 @@ export const uploadWalletPayment = async (req, res, next) => {
       utrId: utr,
       amount: amt,
       qrCode: qrCodeSnapshot,
-      paymentScreenshot: `/uploads/wallet/${req.file.filename}`,
+      paymentScreenshot: uploadedFileUrl(req.file),
       status: "PENDING",
       appliedToInvoices: 0,
       leftoverCreditAfter: 0,

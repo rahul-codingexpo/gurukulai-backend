@@ -2,6 +2,7 @@ import Staff from "./staff.model.js";
 import User from "../user/user.model.js";
 import Role from "../auth/role.model.js";
 import bcrypt from "bcryptjs";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -19,8 +20,7 @@ const allowedDocumentMimeTypes = new Set([
 
 const getUploadedFile = (files, fieldName) => files?.[fieldName]?.[0] ?? null;
 
-const uploadsUrlFromFile = (file) =>
-  file?.filename ? `/uploads/${file.filename}` : undefined;
+const uploadsUrlFromFile = (file) => uploadedFileUrl(file);
 
 const validateCreatePayload = (payload) => {
   const { name, designation, salary, joiningDate, status } = payload;

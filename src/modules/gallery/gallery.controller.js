@@ -1,4 +1,5 @@
 import Gallery from "./gallery.model.js";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -47,7 +48,7 @@ export const uploadGalleryMedia = async (req, res, next) => {
         title,
         description,
         mediaType,
-        mediaUrl: `uploads/gallery/${f.filename}`,
+        mediaUrl: uploadedFileUrl(f),
         mimeType: f.mimetype || "",
         size: f.size || 0,
         uploadedBy: req.user._id,
@@ -149,7 +150,7 @@ export const updateGalleryItem = async (req, res, next) => {
         });
       }
       item.mediaType = mediaType;
-      item.mediaUrl = `uploads/gallery/${req.file.filename}`;
+      item.mediaUrl = uploadedFileUrl(req.file);
       item.mimeType = req.file.mimetype || "";
       item.size = req.file.size || 0;
     }

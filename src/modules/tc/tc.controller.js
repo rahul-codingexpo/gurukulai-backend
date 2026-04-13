@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import TransferCertificate from "./tc.model.js";
 import Student from "../student/student.model.js";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -167,7 +168,7 @@ export const uploadTC = async (req, res, next) => {
       issueDate: issueDateObj,
       status: "ACTIVE",
       file: {
-        path: `/uploads/tc/${path.basename(req.file.path)}`,
+        path: uploadedFileUrl(req.file),
         originalName: req.file.originalname,
         mimeType: req.file.mimetype,
         size: req.file.size,
@@ -500,12 +501,14 @@ export const downloadTCFile = async (req, res, next) => {
       });
     }
 
-    const fullPath = path.join(process.cwd(), tc.file.path.replace(/^\//, ""));
+    if (/^https?:\/\//i.test(tc.file.path)) {
+      return res.redirect(tc.file.path);
+    }
 
+    const fullPath = path.join(process.cwd(), tc.file.path.replace(/^\//, ""));
     if (!fs.existsSync(fullPath)) {
       return res.status(404).json({ success: false, message: "File not found on server" });
     }
-
     return res.download(fullPath, tc.file.originalName || path.basename(fullPath));
   } catch (error) {
     next(error);

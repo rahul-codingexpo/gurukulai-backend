@@ -1,7 +1,7 @@
 # GurukulAI Backend – Mobile API Documentation
 
 **Base URL:** `http://localhost:5000/api`
-**render api**
+**render api** `https://gym-backend-cwp1.onrender.com`
 **Base URL:** `
 **Auth header (protected APIs):** `Authorization: Bearer <token>`
 

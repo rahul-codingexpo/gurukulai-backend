@@ -1,9 +1,7 @@
 import express from "express";
-import fs from "fs";
-import path from "path";
-import multer from "multer";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
+import { createSpacesUpload } from "../../middleware/spacesUpload.middleware.js";
 import {
   uploadGalleryMedia,
   getGalleryList,
@@ -14,26 +12,16 @@ import {
 
 const router = express.Router();
 
-const galleryDir = path.join(process.cwd(), "uploads", "gallery");
-if (!fs.existsSync(galleryDir)) {
-  fs.mkdirSync(galleryDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, galleryDir),
-  filename: (req, file, cb) => {
-    const safe = String(file.originalname || "").replace(/\s+/g, "_");
-    cb(null, `${Date.now()}-${safe}`);
-  },
-});
-
 const fileFilter = (req, file, cb) => {
   const m = String(file.mimetype || "");
   if (m.startsWith("image/") || m.startsWith("video/")) return cb(null, true);
   return cb(new Error("Only image/video files are allowed"), false);
 };
 
-const galleryUpload = multer({ storage, fileFilter });
+const galleryUpload = createSpacesUpload({
+  folder: "uploads/gallery",
+  fileFilter,
+});
 
 // Web + app listing
 router.get(

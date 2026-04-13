@@ -128,6 +128,7 @@ import TransferCertificate from "../tc/tc.model.js";
 import bcrypt from "bcryptjs";
 import XLSX from "xlsx";
 import fs from "fs";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 const DEFAULT_STUDENT_PASSWORD =
   process.env.DEFAULT_STUDENT_PASSWORD ||
@@ -194,10 +195,10 @@ export const createAdmission = async (req, res, next) => {
 
     /* FILES */
 
-    const studentPhoto = req.files?.studentPhoto?.[0]?.path || null;
-    const fatherIdProof = req.files?.fatherIdProof?.[0]?.path || null;
-    const motherIdProof = req.files?.motherIdProof?.[0]?.path || null;
-    const parentSignature = req.files?.parentSignature?.[0]?.path || null;
+    const studentPhoto = uploadedFileUrl(req.files?.studentPhoto?.[0]) || null;
+    const fatherIdProof = uploadedFileUrl(req.files?.fatherIdProof?.[0]) || null;
+    const motherIdProof = uploadedFileUrl(req.files?.motherIdProof?.[0]) || null;
+    const parentSignature = uploadedFileUrl(req.files?.parentSignature?.[0]) || null;
 
     /* PARSE BODY SAFELY */
 
@@ -466,7 +467,9 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
 
     // Passwords are optional: if not provided, defaults will be used.
 
-    const workbook = XLSX.readFile(req.file.path, { cellDates: true });
+    const workbook = req.file.buffer
+      ? XLSX.read(req.file.buffer, { type: "buffer", cellDates: true })
+      : XLSX.readFile(req.file.path, { cellDates: true });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
@@ -724,8 +727,9 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
       }
     }
 
-    // Cleanup uploaded excel
-    fs.unlink(req.file.path, () => {});
+    if (req.file.path) {
+      fs.unlink(req.file.path, () => {});
+    }
 
     return res.json({
       success: true,
@@ -925,15 +929,7 @@ export const updateStudent = async (req, res, next) => {
 
     // Persist uploaded documents if they were provided in multipart/form-data.
     // (PUT route already applies multer fields for these keys.)
-    const fileToUploadPath = (f) => {
-      if (!f) return undefined;
-      if (f.filename) return `/uploads/${f.filename}`;
-      if (f.path) {
-        const parts = String(f.path).split(/[/\\]/g);
-        return parts.length ? `/uploads/${parts[parts.length - 1]}` : f.path;
-      }
-      return undefined;
-    };
+    const fileToUploadPath = (f) => uploadedFileUrl(f);
     if (req.files?.studentPhoto?.[0]) {
       student.documents = student.documents || {};
       student.documents.studentPhoto = fileToUploadPath(req.files.studentPhoto[0]);
