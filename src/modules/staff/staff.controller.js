@@ -3,6 +3,7 @@ import User from "../user/user.model.js";
 import Role from "../auth/role.model.js";
 import bcrypt from "bcryptjs";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -311,6 +312,13 @@ export const getStaff = async (req, res, next) => {
 export const updateStaff = async (req, res, next) => {
   try {
     const updatePayload = { ...req.body };
+    const existingStaff = await Staff.findById(req.params.id);
+    if (!existingStaff) {
+      return res.status(404).json({
+        success: false,
+        message: "Staff not found",
+      });
+    }
 
     if (updatePayload.salary !== undefined) {
       const salaryNum = Number(updatePayload.salary);
@@ -344,6 +352,35 @@ export const updateStaff = async (req, res, next) => {
     const staff = await Staff.findByIdAndUpdate(req.params.id, updatePayload, {
       new: true,
     });
+
+    if (
+      updatePayload.photoUrl &&
+      existingStaff.photoUrl &&
+      existingStaff.photoUrl !== updatePayload.photoUrl
+    ) {
+      await deleteFromSpacesByUrl(existingStaff.photoUrl);
+    }
+    if (
+      updatePayload.aadharDocumentUrl &&
+      existingStaff.aadharDocumentUrl &&
+      existingStaff.aadharDocumentUrl !== updatePayload.aadharDocumentUrl
+    ) {
+      await deleteFromSpacesByUrl(existingStaff.aadharDocumentUrl);
+    }
+    if (
+      updatePayload.panDocumentUrl &&
+      existingStaff.panDocumentUrl &&
+      existingStaff.panDocumentUrl !== updatePayload.panDocumentUrl
+    ) {
+      await deleteFromSpacesByUrl(existingStaff.panDocumentUrl);
+    }
+    if (
+      updatePayload.experienceDocumentUrl &&
+      existingStaff.experienceDocumentUrl &&
+      existingStaff.experienceDocumentUrl !== updatePayload.experienceDocumentUrl
+    ) {
+      await deleteFromSpacesByUrl(existingStaff.experienceDocumentUrl);
+    }
 
     res.json({
       success: true,

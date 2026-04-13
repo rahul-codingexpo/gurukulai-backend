@@ -1,5 +1,6 @@
 import Gallery from "./gallery.model.js";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -149,10 +150,14 @@ export const updateGalleryItem = async (req, res, next) => {
           message: "Invalid media file (allowed: images/videos)",
         });
       }
+      const oldMediaUrl = item.mediaUrl;
       item.mediaType = mediaType;
       item.mediaUrl = uploadedFileUrl(req.file);
       item.mimeType = req.file.mimetype || "";
       item.size = req.file.size || 0;
+      if (oldMediaUrl && oldMediaUrl !== item.mediaUrl) {
+        await deleteFromSpacesByUrl(oldMediaUrl);
+      }
     }
 
     await item.save();

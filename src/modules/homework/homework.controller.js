@@ -1,5 +1,6 @@
 import Homework from "./homework.model.js";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -19,6 +20,8 @@ const parseBoolean = (v) => {
   if (v === false || v === "false" || v === "0" || v === 0) return false;
   return undefined;
 };
+
+const parseReplaceFilesFlag = (v) => v === true || v === "true" || v === "1" || v === 1;
 
 const parseOptionalMaxScore = (v) => {
   if (v === undefined || v === null || v === "") return undefined;
@@ -246,7 +249,14 @@ export const updateHomework = async (req, res, next) => {
       const newPaths = Array.isArray(req.files.files)
         ? req.files.files.map((f) => uploadedFileUrl(f))
         : [uploadedFileUrl(req.files.files)];
-      homework.files = [...(homework.files || []), ...newPaths];
+      if (parseReplaceFilesFlag(body.replaceFiles)) {
+        for (const oldFile of homework.files || []) {
+          await deleteFromSpacesByUrl(oldFile);
+        }
+        homework.files = newPaths;
+      } else {
+        homework.files = [...(homework.files || []), ...newPaths];
+      }
     }
 
     await homework.save();

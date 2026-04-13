@@ -1,5 +1,6 @@
 import StudyMaterial from "./studyMaterial.model.js";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -19,6 +20,8 @@ const parseBoolean = (v) => {
   if (v === false || v === "false" || v === "0" || v === 0) return false;
   return undefined;
 };
+
+const parseReplaceFilesFlag = (v) => v === true || v === "true" || v === "1" || v === 1;
 
 /** Create – Admin, Principal, Teacher */
 export const createStudyMaterial = async (req, res, next) => {
@@ -204,7 +207,14 @@ export const updateStudyMaterial = async (req, res, next) => {
       const filePaths = Array.isArray(req.files.files)
         ? req.files.files.map((f) => uploadedFileUrl(f))
         : [uploadedFileUrl(req.files.files)];
-      material.files = [...(material.files || []), ...filePaths];
+      if (parseReplaceFilesFlag(body.replaceFiles)) {
+        for (const oldFile of material.files || []) {
+          await deleteFromSpacesByUrl(oldFile);
+        }
+        material.files = filePaths;
+      } else {
+        material.files = [...(material.files || []), ...filePaths];
+      }
     }
 
     await material.save();

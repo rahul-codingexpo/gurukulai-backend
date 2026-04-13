@@ -1,5 +1,6 @@
 import School from "./school.model.js";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 /**
  * Create School
@@ -90,6 +91,14 @@ export const updateSchool = async (req, res, next) => {
       }
     }
 
+    const schoolDoc = await School.findById(req.params.id);
+    if (!schoolDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "School not found",
+      });
+    }
+
     const update = { ...(req.body || {}) };
 
     // Canonicalize UPI id (accept aliases)
@@ -101,11 +110,15 @@ export const updateSchool = async (req, res, next) => {
     if (update.payment) delete update.payment;
 
     // Canonicalize QR code (accept file uploads aliases)
+    const logoFile = req.files?.logo?.[0] || null;
     const qrFile =
       req.files?.qrCode?.[0] ||
       req.files?.paymentQr?.[0] ||
       req.file ||
       null;
+    if (logoFile) {
+      update.logo = uploadedFileUrl(logoFile);
+    }
     if (qrFile) {
       update.qrCode = uploadedFileUrl(qrFile);
     }
@@ -119,6 +132,13 @@ export const updateSchool = async (req, res, next) => {
     const school = await School.findByIdAndUpdate(req.params.id, update, {
       new: true,
     });
+
+    if (logoFile && schoolDoc.logo && schoolDoc.logo !== update.logo) {
+      await deleteFromSpacesByUrl(schoolDoc.logo);
+    }
+    if (qrFile && schoolDoc.qrCode && schoolDoc.qrCode !== update.qrCode) {
+      await deleteFromSpacesByUrl(schoolDoc.qrCode);
+    }
 
     res.json({
       success: true,

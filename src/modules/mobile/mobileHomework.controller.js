@@ -7,6 +7,7 @@ import Student from "../student/student.model.js";
 import ClassModel from "../academic/class.model.js";
 import Section from "../academic/section.model.js";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 
@@ -15,6 +16,8 @@ const parseBoolean = (v) => {
   if (v === false || v === "false" || v === "0" || v === 0) return false;
   return undefined;
 };
+
+const parseReplaceFilesFlag = (v) => v === true || v === "true" || v === "1" || v === 1;
 
 const parseOptionalMaxScore = (v) => {
   if (v === undefined || v === null || v === "") return undefined;
@@ -826,7 +829,14 @@ export const updateMobileHomework = async (req, res, next) => {
       const newPaths = Array.isArray(req.files.files)
         ? req.files.files.map((f) => uploadedFileUrl(f))
         : [uploadedFileUrl(req.files.files)];
-      homework.files = [...(homework.files || []), ...newPaths];
+      if (parseReplaceFilesFlag(body.replaceFiles)) {
+        for (const oldFile of homework.files || []) {
+          await deleteFromSpacesByUrl(oldFile);
+        }
+        homework.files = newPaths;
+      } else {
+        homework.files = [...(homework.files || []), ...newPaths];
+      }
     }
 
     if (homework.dueDate < homework.date) {

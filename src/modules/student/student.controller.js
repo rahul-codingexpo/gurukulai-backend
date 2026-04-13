@@ -129,6 +129,7 @@ import bcrypt from "bcryptjs";
 import XLSX from "xlsx";
 import fs from "fs";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const DEFAULT_STUDENT_PASSWORD =
   process.env.DEFAULT_STUDENT_PASSWORD ||
@@ -932,19 +933,35 @@ export const updateStudent = async (req, res, next) => {
     const fileToUploadPath = (f) => uploadedFileUrl(f);
     if (req.files?.studentPhoto?.[0]) {
       student.documents = student.documents || {};
+      const old = student.documents.studentPhoto;
       student.documents.studentPhoto = fileToUploadPath(req.files.studentPhoto[0]);
+      if (old && old !== student.documents.studentPhoto) {
+        await deleteFromSpacesByUrl(old);
+      }
     }
     if (req.files?.fatherIdProof?.[0]) {
       student.documents = student.documents || {};
+      const old = student.documents.fatherIdProof;
       student.documents.fatherIdProof = fileToUploadPath(req.files.fatherIdProof[0]);
+      if (old && old !== student.documents.fatherIdProof) {
+        await deleteFromSpacesByUrl(old);
+      }
     }
     if (req.files?.motherIdProof?.[0]) {
       student.documents = student.documents || {};
+      const old = student.documents.motherIdProof;
       student.documents.motherIdProof = fileToUploadPath(req.files.motherIdProof[0]);
+      if (old && old !== student.documents.motherIdProof) {
+        await deleteFromSpacesByUrl(old);
+      }
     }
     if (req.files?.parentSignature?.[0]) {
       student.documents = student.documents || {};
+      const old = student.documents.parentSignature;
       student.documents.parentSignature = fileToUploadPath(req.files.parentSignature[0]);
+      if (old && old !== student.documents.parentSignature) {
+        await deleteFromSpacesByUrl(old);
+      }
     }
 
     await student.save();
