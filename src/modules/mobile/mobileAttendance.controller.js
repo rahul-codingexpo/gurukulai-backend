@@ -2,6 +2,7 @@ import Student from "../student/student.model.js";
 import Staff from "../staff/staff.model.js";
 import StudentAttendance from "../attendance/studentAttendance.model.js";
 import StaffAttendance from "../attendance/staffAttendance.model.js";
+import mongoose from "mongoose";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 
@@ -363,6 +364,35 @@ export const teacherMarkStudentAttendance = async (req, res, next) => {
       });
     }
 
+    // Validate that each student exists in this school.
+    // Without this, attendance can be stored for invalid/wrong-school IDs and
+    // populate("studentId") returns null in response.
+    const requestedIds = normalizedEntries.map((e) => String(e.studentId));
+    const invalidObjectIds = requestedIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+    if (invalidObjectIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more studentId values are invalid",
+        data: { invalidStudentIds: invalidObjectIds },
+      });
+    }
+    const uniqueStudentIds = [...new Set(requestedIds)];
+    const students = await Student.find({
+      schoolId,
+      _id: { $in: uniqueStudentIds },
+    })
+      .select("_id name rollNumber className section")
+      .lean();
+    const studentById = new Map(students.map((s) => [String(s._id), s]));
+    const notFoundIds = uniqueStudentIds.filter((id) => !studentById.has(id));
+    if (notFoundIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more students are not found in this school",
+        data: { invalidStudentIds: notFoundIds },
+      });
+    }
+
     // Upsert bulk
     const toUpsert = normalizedEntries.map((e) => ({
       updateOne: {
@@ -390,17 +420,24 @@ export const teacherMarkStudentAttendance = async (req, res, next) => {
       .populate("markedBy", "name")
       .lean();
 
-    const normalized = records.map((r) => ({
+    const normalized = records.map((r) => {
+      const refStudentId =
+        r.studentId && typeof r.studentId === "object"
+          ? String(r.studentId._id || "")
+          : String(r.studentId || "");
+      const fallbackStudent = studentById.get(refStudentId);
+      return {
       _id: r._id,
       studentId: r.studentId?._id || r.studentId,
-      name: r.studentId?.name || null,
-      rollNumber: r.studentId?.rollNumber || null,
-      className: r.studentId?.className || null,
-      section: r.studentId?.section || null,
+      name: r.studentId?.name || fallbackStudent?.name || null,
+      rollNumber: r.studentId?.rollNumber || fallbackStudent?.rollNumber || null,
+      className: r.studentId?.className || fallbackStudent?.className || null,
+      section: r.studentId?.section || fallbackStudent?.section || null,
       status: r.markType || r.status,
       markedBy: r.markedBy?.name || null,
       markedAt: r.updatedAt || null,
-    }));
+    };
+    });
 
     const present = normalized.filter((r) => r.status === "Present").length;
     const absent = normalized.filter((r) => r.status === "Absent").length;

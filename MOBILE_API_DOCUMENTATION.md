@@ -1443,7 +1443,8 @@ Uses the linked student’s `schoolId` and `className` to discover available qui
 **Auth:** Admin / Principal
 
 ### 9.6 Mobile gallery list
-**GET** `/api/mobile/gallery?mediaType=VIDEO&search=annual`  
+**GET** `/api/mobile/gallery`  
+optional `?mediaType=VIDEO&search=annual`
 **Auth:** Student / Parent / Teacher / Staff
 
 **response**

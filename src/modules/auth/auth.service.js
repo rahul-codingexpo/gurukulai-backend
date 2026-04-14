@@ -14,10 +14,11 @@ const emailOnlyRoles = new Set([
   "SuperAdmin",
   "Admin",
   "Principal",
-  "Teacher",
   "Accountant",
   "Librarian",
 ]);
+/** Login with email, phone, or username (same checks as students/parents/staff). */
+const emailPhoneUsernameRoles = new Set(["Teacher"]);
 const usernamePhoneRoles = new Set(["Student", "Parent", "Staff"]);
 
 const findUserByLoginId = async (resolvedLoginId) => {
@@ -52,10 +53,25 @@ const findUserByLoginId = async (resolvedLoginId) => {
 
 const enforceIdentifierByRole = ({ user, resolvedLoginId }) => {
   const roleName = user?.roleId?.name;
-  const normalizedEmail = String(resolvedLoginId).trim().toLowerCase();
+  const normalizedLogin = String(resolvedLoginId).trim().toLowerCase();
+
+  if (roleName && emailPhoneUsernameRoles.has(roleName)) {
+    const matchesEmail =
+      user.email && normalizedLogin === String(user.email).toLowerCase();
+    const matchesPhone =
+      user.phone && String(resolvedLoginId) === String(user.phone);
+    const matchesUsername =
+      user.username && String(resolvedLoginId) === String(user.username);
+    if (!matchesEmail && !matchesPhone && !matchesUsername) {
+      const err = new Error("Email, phone, or username required for this role");
+      err.statusCode = 401;
+      throw err;
+    }
+    return;
+  }
 
   if (roleName && emailOnlyRoles.has(roleName)) {
-    if (!user.email || normalizedEmail !== String(user.email).toLowerCase()) {
+    if (!user.email || normalizedLogin !== String(user.email).toLowerCase()) {
       const err = new Error("Email login required for this role");
       err.statusCode = 401;
       throw err;
