@@ -188,6 +188,34 @@ const resolveSchoolId = (req) => {
   return req.user.schoolId;
 };
 
+const toOptionalString = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const str = String(value).trim();
+  return str ? str : undefined;
+};
+
+const toOptionalNumber = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : undefined;
+};
+
+const toOptionalDate = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const normalizeStudentStatus = (value) => {
+  const raw = toOptionalString(value);
+  if (!raw) return undefined;
+  const normalized = raw.toUpperCase();
+  return ["ACTIVE", "INACTIVE", "SUSPENDED"].includes(normalized)
+    ? normalized
+    : undefined;
+};
+
 /* CREATE ADMISSION */
 
 export const createAdmission = async (req, res, next) => {
@@ -200,6 +228,13 @@ export const createAdmission = async (req, res, next) => {
     const fatherIdProof = uploadedFileUrl(req.files?.fatherIdProof?.[0]) || null;
     const motherIdProof = uploadedFileUrl(req.files?.motherIdProof?.[0]) || null;
     const parentSignature = uploadedFileUrl(req.files?.parentSignature?.[0]) || null;
+    const fatherPhoto = uploadedFileUrl(req.files?.fatherPhoto?.[0]) || null;
+    const motherPhoto = uploadedFileUrl(req.files?.motherPhoto?.[0]) || null;
+    const marksheetPhoto = uploadedFileUrl(req.files?.marksheetPhoto?.[0]) || null;
+    const reportC = uploadedFileUrl(req.files?.reportC?.[0]) || null;
+    const cc = uploadedFileUrl(req.files?.cc?.[0]) || null;
+    const tc = uploadedFileUrl(req.files?.tc?.[0]) || null;
+    const dobCertificate = uploadedFileUrl(req.files?.dobCertificate?.[0]) || null;
 
     /* PARSE BODY SAFELY */
 
@@ -222,6 +257,41 @@ export const createAdmission = async (req, res, next) => {
       admissionDate,
       currentAddress,
       permanentAddress,
+      route,
+      group,
+      referredBy,
+      fatherQualification,
+      fatherOccupation,
+      fatherMobileNumber,
+      fatherDob,
+      motherQualification,
+      motherOccupation,
+      motherDob,
+      parentsAnniversaryDate,
+      lastSchoolName,
+      lastExam,
+      lastExamYear,
+      marks,
+      board,
+      formNo,
+      remarks,
+      hostelRoomNo,
+      bedNo,
+      schoolStatus,
+      discountDate,
+      scholarshipNo,
+      feeBalance,
+      bloodGroup,
+      height,
+      weight,
+      visionLeft,
+      visionRight,
+      dentalHygiene,
+      additionalField1,
+      additionalField2,
+      aadharCardNo,
+      busNo,
+      status,
     } = req.body;
 
     // Store only a single address string (not current/permanent split)
@@ -277,8 +347,65 @@ export const createAdmission = async (req, res, next) => {
         motherIdProof,
         parentSignature,
         studentPhoto,
+        marksheetPhoto: marksheetPhoto || toOptionalString(req.body.marksheetPhoto),
+        reportC: reportC || toOptionalString(req.body.reportC),
+        cc: cc || toOptionalString(req.body.cc),
+        tc: tc || toOptionalString(req.body.tc),
+        dobCertificate: dobCertificate || toOptionalString(req.body.dobCertificate),
       },
       feeStructure,
+      route: toOptionalString(route),
+      group: toOptionalString(group),
+      referredBy: toOptionalString(referredBy),
+      formNo: toOptionalString(formNo),
+      remarks: toOptionalString(remarks),
+      hostelRoomNo: toOptionalString(hostelRoomNo),
+      bedNo: toOptionalString(bedNo),
+      schoolStatus: toOptionalString(schoolStatus),
+      discountDate: toOptionalDate(discountDate),
+      scholarshipNo: toOptionalString(scholarshipNo),
+      feeBalance: toOptionalNumber(feeBalance),
+      bloodGroup: toOptionalString(bloodGroup),
+      height: toOptionalString(height),
+      weight: toOptionalString(weight),
+      visionLeft: toOptionalString(visionLeft),
+      visionRight: toOptionalString(visionRight),
+      dentalHygiene: toOptionalString(dentalHygiene),
+      additionalField1: toOptionalString(additionalField1),
+      additionalField2: toOptionalString(additionalField2),
+      aadharCardNo: toOptionalString(aadharCardNo),
+      busNo: toOptionalString(busNo),
+      status: normalizeStudentStatus(status),
+      previousSchool: {
+        ...previousSchool,
+        schoolName: toOptionalString(lastSchoolName) || previousSchool?.schoolName,
+        lastExam: toOptionalString(lastExam) || previousSchool?.lastExam,
+        lastExamYear: toOptionalNumber(lastExamYear) || previousSchool?.lastExamYear,
+        marks: toOptionalString(marks) || previousSchool?.marks,
+        board: toOptionalString(board) || previousSchool?.board,
+      },
+      parents: {
+        ...parents,
+        father: {
+          ...(parents?.father || {}),
+          qualification:
+            toOptionalString(fatherQualification) || parents?.father?.qualification,
+          occupation: toOptionalString(fatherOccupation) || parents?.father?.occupation,
+          phone: toOptionalString(fatherMobileNumber) || parents?.father?.phone,
+          dob: toOptionalDate(fatherDob) || parents?.father?.dob,
+          photo: fatherPhoto || toOptionalString(req.body.fatherPhoto) || parents?.father?.photo,
+        },
+        mother: {
+          ...(parents?.mother || {}),
+          qualification:
+            toOptionalString(motherQualification) || parents?.mother?.qualification,
+          occupation: toOptionalString(motherOccupation) || parents?.mother?.occupation,
+          dob: toOptionalDate(motherDob) || parents?.mother?.dob,
+          photo: motherPhoto || toOptionalString(req.body.motherPhoto) || parents?.mother?.photo,
+        },
+        anniversaryDate:
+          toOptionalDate(parentsAnniversaryDate) || parents?.anniversaryDate,
+      },
     });
 
     /* STUDENT LOGIN */
@@ -587,6 +714,42 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
         const motherPhone = pick(row, ["motherPhone", "Mother Phone"]);
         const motherOccupation = pick(row, ["motherOccupation", "Mother Occupation"]);
 
+        const route = pick(row, ["route", "Route"]);
+        const group = pick(row, ["group", "Group"]);
+        const referredBy = pick(row, ["referredBy", "Refered By", "Referred By"]);
+        const fatherQualification = pick(row, ["fatherQualification", "Father Qualification"]);
+        const fatherDobRaw = pick(row, ["fatherDob", "Father DOB"]);
+        const motherQualification = pick(row, ["motherQualification", "Mother Qualification"]);
+        const motherDobRaw = pick(row, ["motherDob", "Mother DOB"]);
+        const parentsAnniversaryDateRaw = pick(row, [
+          "parentsAnniversaryDate",
+          "Parents Anniversary Dates",
+        ]);
+        const lastSchoolName = pick(row, ["lastSchoolName", "Last School Name"]);
+        const lastExam = pick(row, ["lastExam", "Last Exam"]);
+        const lastExamYear = pick(row, ["lastExamYear", "Last Exam Year"]);
+        const status = pick(row, ["status", "Status"]);
+        const marks = pick(row, ["marks", "Marks"]);
+        const board = pick(row, ["board", "Board"]);
+        const formNo = pick(row, ["formNo", "Form No"]);
+        const remarks = pick(row, ["remarks", "Remarks"]);
+        const hostelRoomNo = pick(row, ["hostelRoomNo", "Hostel Room No"]);
+        const bedNo = pick(row, ["bedNo", "Bed No"]);
+        const schoolStatus = pick(row, ["schoolStatus", "School Status"]);
+        const discountDateRaw = pick(row, ["discountDate", "Discount Date"]);
+        const scholarshipNo = pick(row, ["scholarshipNo", "Scholarship No"]);
+        const feeBalance = pick(row, ["feeBalance", "Fee Balance"]);
+        const bloodGroup = pick(row, ["bloodGroup", "Blood Group"]);
+        const height = pick(row, ["height", "Height"]);
+        const weight = pick(row, ["weight", "Weight"]);
+        const visionLeft = pick(row, ["visionLeft", "Vision Left"]);
+        const visionRight = pick(row, ["visionRight", "Vision Right"]);
+        const dentalHygiene = pick(row, ["dentalHygiene", "Dental Hygeine"]);
+        const additionalField1 = pick(row, ["additionalField1", "Additional Feild 1"]);
+        const additionalField2 = pick(row, ["additionalField2", "Additional Feild 2"]);
+        const aadharCardNo = pick(row, ["aadharCardNo", "Aadhar Card No"]);
+        const busNo = pick(row, ["busNo", "Bus No"]);
+
         if (!name || !admissionNumber || !className || !section || !admissionDateRaw || !fatherName || !fatherPhone || !motherName || !motherPhone) {
           errors.push({
             rowNo,
@@ -607,6 +770,10 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
 
         const dob = toDate(dobRaw);
         const admissionDate = toDate(admissionDateRaw);
+        const fatherDob = toDate(fatherDobRaw);
+        const motherDob = toDate(motherDobRaw);
+        const parentsAnniversaryDate = toDate(parentsAnniversaryDateRaw);
+        const discountDate = toDate(discountDateRaw);
 
         if (!admissionDate) {
           errors.push({ rowNo, admissionNumber: normalizedAdmissionNumber, reason: "Invalid admissionDate" });
@@ -649,15 +816,49 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
             father: {
               name: toStr(fatherName),
               phone: toStr(fatherPhone),
+              qualification: toMaybeStr(fatherQualification),
               occupation: toMaybeStr(fatherOccupation),
               email: toMaybeStr(fatherEmail),
+              dob: fatherDob || undefined,
             },
             mother: {
               name: toStr(motherName),
               phone: toStr(motherPhone),
+              qualification: toMaybeStr(motherQualification),
               occupation: toMaybeStr(motherOccupation),
+              dob: motherDob || undefined,
             },
+            anniversaryDate: parentsAnniversaryDate || undefined,
           },
+          previousSchool: {
+            schoolName: toMaybeStr(lastSchoolName),
+            lastExam: toMaybeStr(lastExam),
+            lastExamYear: toOptionalNumber(lastExamYear),
+            marks: toMaybeStr(marks),
+            board: toMaybeStr(board),
+          },
+          status: normalizeStudentStatus(status),
+          route: toMaybeStr(route),
+          group: toMaybeStr(group),
+          referredBy: toMaybeStr(referredBy),
+          formNo: toMaybeStr(formNo),
+          remarks: toMaybeStr(remarks),
+          hostelRoomNo: toMaybeStr(hostelRoomNo),
+          bedNo: toMaybeStr(bedNo),
+          schoolStatus: toMaybeStr(schoolStatus),
+          discountDate: discountDate || undefined,
+          scholarshipNo: toMaybeStr(scholarshipNo),
+          feeBalance: toOptionalNumber(feeBalance),
+          bloodGroup: toMaybeStr(bloodGroup),
+          height: toMaybeStr(height),
+          weight: toMaybeStr(weight),
+          visionLeft: toMaybeStr(visionLeft),
+          visionRight: toMaybeStr(visionRight),
+          dentalHygiene: toMaybeStr(dentalHygiene),
+          additionalField1: toMaybeStr(additionalField1),
+          additionalField2: toMaybeStr(additionalField2),
+          aadharCardNo: toMaybeStr(aadharCardNo),
+          busNo: toMaybeStr(busNo),
         });
 
         // STUDENT LOGIN
@@ -825,6 +1026,41 @@ export const updateStudent = async (req, res, next) => {
       phone,
       admissionNumber,
       admissionDate,
+      route,
+      group,
+      referredBy,
+      fatherQualification,
+      fatherOccupation,
+      fatherMobileNumber,
+      fatherDob,
+      motherQualification,
+      motherOccupation,
+      motherDob,
+      parentsAnniversaryDate,
+      lastSchoolName,
+      lastExam,
+      lastExamYear,
+      marks,
+      board,
+      formNo,
+      remarks,
+      hostelRoomNo,
+      bedNo,
+      schoolStatus,
+      discountDate,
+      scholarshipNo,
+      feeBalance,
+      bloodGroup,
+      height,
+      weight,
+      visionLeft,
+      visionRight,
+      dentalHygiene,
+      additionalField1,
+      additionalField2,
+      aadharCardNo,
+      busNo,
+      status,
     } = req.body;
 
     // Phone fallback: if phone not provided, allow studentLogin.phone to fill it.
@@ -908,6 +1144,65 @@ export const updateStudent = async (req, res, next) => {
       student.admissionDate = parsed;
     }
 
+    if (route !== undefined) student.route = toOptionalString(route);
+    if (group !== undefined) student.group = toOptionalString(group);
+    if (referredBy !== undefined) student.referredBy = toOptionalString(referredBy);
+    if (formNo !== undefined) student.formNo = toOptionalString(formNo);
+    if (remarks !== undefined) student.remarks = toOptionalString(remarks);
+    if (hostelRoomNo !== undefined) student.hostelRoomNo = toOptionalString(hostelRoomNo);
+    if (bedNo !== undefined) student.bedNo = toOptionalString(bedNo);
+    if (schoolStatus !== undefined) student.schoolStatus = toOptionalString(schoolStatus);
+    if (discountDate !== undefined) student.discountDate = toOptionalDate(discountDate);
+    if (scholarshipNo !== undefined) student.scholarshipNo = toOptionalString(scholarshipNo);
+    if (feeBalance !== undefined) student.feeBalance = toOptionalNumber(feeBalance);
+    if (bloodGroup !== undefined) student.bloodGroup = toOptionalString(bloodGroup);
+    if (height !== undefined) student.height = toOptionalString(height);
+    if (weight !== undefined) student.weight = toOptionalString(weight);
+    if (visionLeft !== undefined) student.visionLeft = toOptionalString(visionLeft);
+    if (visionRight !== undefined) student.visionRight = toOptionalString(visionRight);
+    if (dentalHygiene !== undefined) student.dentalHygiene = toOptionalString(dentalHygiene);
+    if (additionalField1 !== undefined) student.additionalField1 = toOptionalString(additionalField1);
+    if (additionalField2 !== undefined) student.additionalField2 = toOptionalString(additionalField2);
+    if (aadharCardNo !== undefined) student.aadharCardNo = toOptionalString(aadharCardNo);
+    if (busNo !== undefined) student.busNo = toOptionalString(busNo);
+    if (status !== undefined) student.status = normalizeStudentStatus(status) || student.status;
+
+    const nextPreviousSchool = student.previousSchool || {};
+    if (lastSchoolName !== undefined) nextPreviousSchool.schoolName = toOptionalString(lastSchoolName);
+    if (lastExam !== undefined) nextPreviousSchool.lastExam = toOptionalString(lastExam);
+    if (lastExamYear !== undefined) nextPreviousSchool.lastExamYear = toOptionalNumber(lastExamYear);
+    if (marks !== undefined) nextPreviousSchool.marks = toOptionalString(marks);
+    if (board !== undefined) nextPreviousSchool.board = toOptionalString(board);
+    if (Object.keys(nextPreviousSchool).length) student.previousSchool = nextPreviousSchool;
+
+    student.parents = student.parents || {};
+    student.parents.father = student.parents.father || {};
+    student.parents.mother = student.parents.mother || {};
+    if (fatherQualification !== undefined) {
+      student.parents.father.qualification = toOptionalString(fatherQualification);
+    }
+    if (fatherOccupation !== undefined) {
+      student.parents.father.occupation = toOptionalString(fatherOccupation);
+    }
+    if (fatherMobileNumber !== undefined) {
+      student.parents.father.phone = toOptionalString(fatherMobileNumber);
+    }
+    if (fatherDob !== undefined) {
+      student.parents.father.dob = toOptionalDate(fatherDob);
+    }
+    if (motherQualification !== undefined) {
+      student.parents.mother.qualification = toOptionalString(motherQualification);
+    }
+    if (motherOccupation !== undefined) {
+      student.parents.mother.occupation = toOptionalString(motherOccupation);
+    }
+    if (motherDob !== undefined) {
+      student.parents.mother.dob = toOptionalDate(motherDob);
+    }
+    if (parentsAnniversaryDate !== undefined) {
+      student.parents.anniversaryDate = toOptionalDate(parentsAnniversaryDate);
+    }
+
     // Persist login references (no credential/user creation in PUT).
     if (studentLogin && typeof studentLogin === "object") {
       student.studentLogin = student.studentLogin || {};
@@ -960,6 +1255,64 @@ export const updateStudent = async (req, res, next) => {
       const old = student.documents.parentSignature;
       student.documents.parentSignature = fileToUploadPath(req.files.parentSignature[0]);
       if (old && old !== student.documents.parentSignature) {
+        await deleteFromSpacesByUrl(old);
+      }
+    }
+    if (req.files?.fatherPhoto?.[0]) {
+      student.parents = student.parents || {};
+      student.parents.father = student.parents.father || {};
+      const old = student.parents.father.photo;
+      student.parents.father.photo = fileToUploadPath(req.files.fatherPhoto[0]);
+      if (old && old !== student.parents.father.photo) {
+        await deleteFromSpacesByUrl(old);
+      }
+    }
+    if (req.files?.motherPhoto?.[0]) {
+      student.parents = student.parents || {};
+      student.parents.mother = student.parents.mother || {};
+      const old = student.parents.mother.photo;
+      student.parents.mother.photo = fileToUploadPath(req.files.motherPhoto[0]);
+      if (old && old !== student.parents.mother.photo) {
+        await deleteFromSpacesByUrl(old);
+      }
+    }
+    if (req.files?.marksheetPhoto?.[0]) {
+      student.documents = student.documents || {};
+      const old = student.documents.marksheetPhoto;
+      student.documents.marksheetPhoto = fileToUploadPath(req.files.marksheetPhoto[0]);
+      if (old && old !== student.documents.marksheetPhoto) {
+        await deleteFromSpacesByUrl(old);
+      }
+    }
+    if (req.files?.reportC?.[0]) {
+      student.documents = student.documents || {};
+      const old = student.documents.reportC;
+      student.documents.reportC = fileToUploadPath(req.files.reportC[0]);
+      if (old && old !== student.documents.reportC) {
+        await deleteFromSpacesByUrl(old);
+      }
+    }
+    if (req.files?.cc?.[0]) {
+      student.documents = student.documents || {};
+      const old = student.documents.cc;
+      student.documents.cc = fileToUploadPath(req.files.cc[0]);
+      if (old && old !== student.documents.cc) {
+        await deleteFromSpacesByUrl(old);
+      }
+    }
+    if (req.files?.tc?.[0]) {
+      student.documents = student.documents || {};
+      const old = student.documents.tc;
+      student.documents.tc = fileToUploadPath(req.files.tc[0]);
+      if (old && old !== student.documents.tc) {
+        await deleteFromSpacesByUrl(old);
+      }
+    }
+    if (req.files?.dobCertificate?.[0]) {
+      student.documents = student.documents || {};
+      const old = student.documents.dobCertificate;
+      student.documents.dobCertificate = fileToUploadPath(req.files.dobCertificate[0]);
+      if (old && old !== student.documents.dobCertificate) {
         await deleteFromSpacesByUrl(old);
       }
     }

@@ -46,13 +46,20 @@ const studentSchema = new mongoose.Schema(
       father: {
         name: String,
         phone: String,
+        qualification: String,
         occupation: String,
+        dob: Date,
+        photo: String,
       },
       mother: {
         name: String,
         phone: String,
+        qualification: String,
         occupation: String,
+        dob: Date,
+        photo: String,
       },
+      anniversaryDate: Date,
     },
 
     previousSchool: {
@@ -61,6 +68,10 @@ const studentSchema = new mongoose.Schema(
       class: String,
       passoutYear: Number,
       percentage: Number,
+      lastExam: String,
+      lastExamYear: Number,
+      marks: String,
+      board: String,
     },
 
     documents: {
@@ -72,7 +83,34 @@ const studentSchema = new mongoose.Schema(
       parentSignature: String,
 
       studentPhoto: String,
+      marksheetPhoto: String,
+      reportC: String,
+      cc: String,
+      tc: String,
+      dobCertificate: String,
     },
+
+    route: String,
+    group: String,
+    referredBy: String,
+    formNo: String,
+    remarks: String,
+    hostelRoomNo: String,
+    bedNo: String,
+    schoolStatus: String,
+    discountDate: Date,
+    scholarshipNo: String,
+    feeBalance: Number,
+    bloodGroup: String,
+    height: String,
+    weight: String,
+    visionLeft: String,
+    visionRight: String,
+    dentalHygiene: String,
+    additionalField1: String,
+    additionalField2: String,
+    aadharCardNo: String,
+    busNo: String,
 
     feeStructure: [
       {

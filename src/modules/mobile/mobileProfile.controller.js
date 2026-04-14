@@ -102,7 +102,7 @@ export const getMobileProfile = async (req, res, next) => {
           generalInformation: {
             phone: (isParent ? req.user.phone : student.phone || req.user.phone) || null,
             gender: student.gender || null,
-            bloodGroup: null, // not stored in schema yet
+            bloodGroup: student.bloodGroup || null,
             currentAddress: student.address || null,
             permanentAddress: null,
           },
