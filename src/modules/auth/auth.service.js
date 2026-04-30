@@ -20,6 +20,12 @@ const emailOnlyRoles = new Set([
 /** Login with email, phone, or username (same checks as students/parents/staff). */
 const emailPhoneUsernameRoles = new Set(["Teacher"]);
 const usernamePhoneRoles = new Set(["Student", "Parent", "Staff"]);
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeLoginIdentifier = (value) => String(value || "").trim();
+const isEmailPath = ({ loginId, email }) =>
+  Boolean(email) || normalizeLoginIdentifier(loginId).includes("@");
+const isValidEmail = (value) => emailRegex.test(normalizeLoginIdentifier(value).toLowerCase());
 
 const findUserByLoginId = async (resolvedLoginId) => {
   const normalizedEmail = String(resolvedLoginId).trim().toLowerCase();
@@ -173,7 +179,30 @@ export const loginService = async (body = {}) => {
     throw err;
   }
 
-  const user = await findUserByLoginId(resolvedLoginId);
+  const loginThroughEmailPath = isEmailPath({ loginId, email });
+  let user = null;
+
+  if (loginThroughEmailPath) {
+    const normalizedEmail = normalizeLoginIdentifier(resolvedLoginId).toLowerCase();
+
+    if (!isValidEmail(normalizedEmail)) {
+      const err = new Error("Invalid email");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    user = await User.findOne({ email: normalizedEmail })
+      .select("+password +passwordReset.otpHash +passwordReset.expiresAt +passwordReset.lastSentAt")
+      .populate("roleId");
+
+    if (!user) {
+      const err = new Error("Email not registered");
+      err.statusCode = 401;
+      throw err;
+    }
+  } else {
+    user = await findUserByLoginId(resolvedLoginId);
+  }
 
   if (!user) {
     const err = new Error("Invalid credentials");
@@ -191,7 +220,7 @@ export const loginService = async (body = {}) => {
   const isMatch = await comparePassword(password, user.password);
 
   if (!isMatch) {
-    const err = new Error("Invalid credentials");
+    const err = new Error("Invalid password");
     err.statusCode = 401;
     throw err;
   }

@@ -130,7 +130,7 @@ or
 ---
 
 ### 1.2 Forgot Password (OTP)
-**POST** `/api/auth/forgot-password`  
+**POST** `/api/auth/forgot-password` 
 **Content-Type:** `application/json`
 
 **Request examples:**
