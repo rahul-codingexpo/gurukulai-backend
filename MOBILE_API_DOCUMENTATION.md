@@ -1,7 +1,7 @@
 # GurukulAI Backend – Mobile API Documentation
 
 **Base URL:** `http://localhost:5000/api`
-**render api** `https://gym-backend-cwp1.onrender.com`
+**render api** `https://gurukulai-backend-1.onrender.com`
 **Base URL:** `
 **Auth header (protected APIs):** `Authorization: Bearer <token>`
 
@@ -509,7 +509,7 @@ This returns the full event object for the logged-in user’s school, and ensure
 ---
 
 ### 3.3 Mark Event as Read
-**PUT** `/api/mobile/events/:id/read`  
+**PUT** `/api/mobile/events/:id/read`
 **Auth:** Required
 
 Use this when the user opens the event details page.

@@ -163,27 +163,8 @@ export const createStaff = async (req, res, next) => {
       });
     }
 
-    // Required document fields
-    const requiredDocs = [
-      "photo",
-      "aadharDocument",
-      "panDocument",
-      "experienceDocument",
-    ];
-
-    const missingDocs = requiredDocs.filter(
-      (f) => !getUploadedFile(req.files, f),
-    );
-    if (missingDocs.length) {
-      return res.status(400).json({
-        success: false,
-        message: `Missing required document(s): ${missingDocs.join(", ")}`,
-      });
-    }
-
-    // Validate mime types
     const photoFile = getUploadedFile(req.files, "photo");
-    if (!photoFile?.mimetype?.startsWith("image/")) {
+    if (photoFile && !photoFile?.mimetype?.startsWith("image/")) {
       return res.status(400).json({
         success: false,
         message: "photo must be an image file",
@@ -192,6 +173,7 @@ export const createStaff = async (req, res, next) => {
 
     for (const docField of ["aadharDocument", "panDocument", "experienceDocument"]) {
       const f = getUploadedFile(req.files, docField);
+      if (!f) continue;
       const ok =
         allowedDocumentMimeTypes.has(f?.mimetype) ||
         // allow images if frontend uploads images for docs
