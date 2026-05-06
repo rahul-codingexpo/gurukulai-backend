@@ -22,6 +22,11 @@ const allowedDocumentMimeTypes = new Set([
 const getUploadedFile = (files, fieldName) => files?.[fieldName]?.[0] ?? null;
 
 const uploadsUrlFromFile = (file) => uploadedFileUrl(file);
+const optionalTrimmedValue = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const trimmed = String(value).trim();
+  return trimmed === "" ? undefined : trimmed;
+};
 
 const validateCreatePayload = (payload) => {
   const { name, designation, salary, joiningDate, status } = payload;
@@ -139,6 +144,8 @@ export const createStaff = async (req, res, next) => {
       username,
       password,
     } = req.body;
+    const normalizedEmail = optionalTrimmedValue(email);
+    const normalizedPhone = optionalTrimmedValue(phone);
 
     const schoolId = resolveSchoolId(req); // SuperAdmin can target a school
 
@@ -202,8 +209,8 @@ export const createStaff = async (req, res, next) => {
 
       user = await User.create({
         name,
-        email,
-        phone,
+        ...(normalizedEmail ? { email: normalizedEmail } : {}),
+        ...(normalizedPhone ? { phone: normalizedPhone } : {}),
         username,
         password: hashedPassword,
         roleId: role._id,
@@ -224,8 +231,8 @@ export const createStaff = async (req, res, next) => {
 
     const staff = await Staff.create({
       name,
-      email,
-      phone,
+      ...(normalizedEmail ? { email: normalizedEmail } : {}),
+      ...(normalizedPhone ? { phone: normalizedPhone } : {}),
       salary: Number(salary),
       designation: String(designation).trim(),
       joiningDate: new Date(joiningDate),
