@@ -42,18 +42,22 @@ const validateCreatePayload = (payload) => {
     return "designation must be Principal, Teacher, or Staff";
   }
 
-  const salaryNum = Number(salary);
-  if (salary === undefined || salary === null || salary === "" || Number.isNaN(salaryNum)) {
-    return "salary is required and must be a number";
+  if (salary !== undefined && salary !== null && salary !== "") {
+    const salaryNum = Number(salary);
+    if (Number.isNaN(salaryNum)) return "salary must be a number";
+    if (salaryNum < 0) return "salary must be >= 0";
   }
-  if (salaryNum < 0) return "salary must be >= 0";
 
-  if (!joiningDate) return "joiningDate is required";
-  const jd = new Date(joiningDate);
-  if (Number.isNaN(jd.getTime())) return "joiningDate must be a valid date";
+  if (joiningDate !== undefined && joiningDate !== null && joiningDate !== "") {
+    const jd = new Date(joiningDate);
+    if (Number.isNaN(jd.getTime())) return "joiningDate must be a valid date";
+  }
 
-  if (!status || !["ACTIVE", "INACTIVE"].includes(String(status).trim())) {
-    return "status must be ACTIVE or INACTIVE";
+  if (status !== undefined && status !== null && status !== "") {
+    const normalizedStatus = String(status).trim().toUpperCase();
+    if (!["ACTIVE", "INACTIVE"].includes(normalizedStatus)) {
+      return "status must be ACTIVE or INACTIVE";
+    }
   }
 
   return null;
@@ -146,6 +150,13 @@ export const createStaff = async (req, res, next) => {
     } = req.body;
     const normalizedEmail = optionalTrimmedValue(email);
     const normalizedPhone = optionalTrimmedValue(phone);
+    const normalizedDesignation = String(designation).trim();
+    const normalizedStatus = optionalTrimmedValue(status)?.toUpperCase();
+    const normalizedJoiningDate = optionalTrimmedValue(joiningDate);
+    const salaryNum =
+      salary !== undefined && salary !== null && salary !== ""
+        ? Number(salary)
+        : undefined;
 
     const schoolId = resolveSchoolId(req); // SuperAdmin can target a school
 
@@ -158,10 +169,10 @@ export const createStaff = async (req, res, next) => {
 
     const payloadError = validateCreatePayload({
       name,
-      designation,
+      designation: normalizedDesignation,
       salary,
       joiningDate,
-      status,
+      status: normalizedStatus,
     });
     if (payloadError) {
       return res.status(400).json({
@@ -196,7 +207,7 @@ export const createStaff = async (req, res, next) => {
     let user = null;
 
     if (username && password) {
-      const role = await Role.findOne({ name: designation });
+      const role = await Role.findOne({ name: normalizedDesignation });
 
       if (!role) {
         return res.status(404).json({
@@ -233,10 +244,10 @@ export const createStaff = async (req, res, next) => {
       name,
       ...(normalizedEmail ? { email: normalizedEmail } : {}),
       ...(normalizedPhone ? { phone: normalizedPhone } : {}),
-      salary: Number(salary),
-      designation: String(designation).trim(),
-      joiningDate: new Date(joiningDate),
-      status: String(status).trim(),
+      ...(salaryNum !== undefined ? { salary: salaryNum } : {}),
+      designation: normalizedDesignation,
+      ...(normalizedJoiningDate ? { joiningDate: new Date(normalizedJoiningDate) } : {}),
+      ...(normalizedStatus ? { status: normalizedStatus } : {}),
       userId: user?._id,
       schoolId,
       photoUrl,
