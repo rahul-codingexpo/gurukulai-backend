@@ -57,6 +57,9 @@ import {
   updateMobileHomework,
   deleteMobileHomework,
   submitMobileHomework,
+  getMyMobileHomeworkSubmission,
+  listMobileHomeworkSubmissions,
+  getMobileHomeworkSubmissionByStudent,
 } from "./mobileHomework.controller.js";
 
 const router = express.Router();
@@ -177,6 +180,24 @@ router.post(
   mobileOnly,
   uploadStudyMaterials.fields([{ name: "files", maxCount: 10 }]),
   submitMobileHomework,
+);
+router.get(
+  "/homework/:id/submission",
+  protect,
+  mobileOnly,
+  getMyMobileHomeworkSubmission,
+);
+router.get(
+  "/homework/:id/submissions",
+  protect,
+  mobileOnly,
+  listMobileHomeworkSubmissions,
+);
+router.get(
+  "/homework/:id/submissions/:studentId",
+  protect,
+  mobileOnly,
+  getMobileHomeworkSubmissionByStudent,
 );
 router.post("/homework/:id/questions", protect, mobileOnly, askTeacherOnHomework);
 router.get("/homework/:id", protect, mobileOnly, getMobileHomeworkById);

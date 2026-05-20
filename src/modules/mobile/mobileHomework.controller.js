@@ -918,6 +918,319 @@ const collectUploadedPaths = (req) => {
   return filePaths;
 };
 
+async function loadHomeworkForTeacherAccess(req, homeworkId) {
+  if (roleNameOf(req) !== "Teacher") {
+    return {
+      error: {
+        status: 403,
+        message: "Only teachers can view student homework submissions",
+      },
+    };
+  }
+
+  const schoolId = req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
+  if (!schoolId) {
+    return { error: { status: 400, message: "School context missing" } };
+  }
+
+  const homework = await Homework.findById(homeworkId)
+    .populate("classId", "name")
+    .populate("sectionId", "name")
+    .populate("subjectId", "name code");
+
+  if (!homework) {
+    return { error: { status: 404, message: "Homework not found" } };
+  }
+  if (String(homework.schoolId) !== String(schoolId)) {
+    return { error: { status: 403, message: "Not allowed to view this homework" } };
+  }
+  if (String(homework.createdBy?._id ?? homework.createdBy) !== String(req.user._id)) {
+    return {
+      error: {
+        status: 403,
+        message: "You can only open homework you assigned",
+      },
+    };
+  }
+
+  return { homework };
+}
+
+function buildSubmissionSummary(sub) {
+  if (!sub) return null;
+  const files = (sub.files || []).map((p) => {
+    const url = String(p || "").startsWith("/") ? p : `/${p}`;
+    return { url, fileName: path.basename(p) };
+  });
+  return {
+    _id: sub._id,
+    note: sub.note || "",
+    fileCount: files.length,
+    files,
+    submittedAt: sub.submittedAt,
+    updatedAt: sub.updatedAt,
+  };
+}
+
+async function serializeSubmissionForTeacher(sub) {
+  if (!sub) return null;
+  const subFiles = await Promise.all(
+    (sub.files || []).map((p) => buildFileResource(p, true, true)),
+  );
+  return {
+    _id: sub._id,
+    note: sub.note || "",
+    files: subFiles,
+    fileCount: subFiles.length,
+    submittedAt: sub.submittedAt,
+    updatedAt: sub.updatedAt,
+  };
+}
+
+/** GET /api/mobile/homework/:id/submissions — Teacher: all students + submission summary */
+export const listMobileHomeworkSubmissions = async (req, res, next) => {
+  try {
+    const loaded = await loadHomeworkForTeacherAccess(req, req.params.id);
+    if (loaded.error) {
+      return res.status(loaded.error.status).json({
+        success: false,
+        message: loaded.error.message,
+      });
+    }
+
+    const { homework } = loaded;
+    const className = homework.classId?.name || "";
+    const sectionName = homework.sectionId?.name || "";
+    if (!className || !sectionName) {
+      return res.status(400).json({
+        success: false,
+        message: "Homework class or section is missing",
+      });
+    }
+
+    const students = await Student.find({
+      schoolId: homework.schoolId,
+      className,
+      section: sectionName,
+      status: "ACTIVE",
+    })
+      .select("_id name admissionNumber rollNumber")
+      .sort({ rollNumber: 1, name: 1 })
+      .lean();
+
+    const submissions = await HomeworkSubmission.find({
+      homeworkId: homework._id,
+    }).lean();
+    const subByStudent = new Map(
+      submissions.map((s) => [String(s.studentId), s]),
+    );
+
+    const statusFilter = String(req.query.status || "").toLowerCase();
+    let rows = students.map((st) => {
+      const sub = subByStudent.get(String(st._id)) || null;
+      const hasSubmission = !!sub;
+      return {
+        studentId: st._id,
+        name: st.name,
+        admissionNumber: st.admissionNumber,
+        rollNumber: st.rollNumber || null,
+        hasSubmission,
+        submittedAt: sub?.submittedAt ?? null,
+        submission: buildSubmissionSummary(sub),
+      };
+    });
+
+    if (statusFilter === "submitted") {
+      rows = rows.filter((r) => r.hasSubmission);
+    } else if (statusFilter === "pending") {
+      rows = rows.filter((r) => !r.hasSubmission);
+    }
+
+    const submittedCount = submissions.length;
+    const totalStudents = students.length;
+
+    return res.json({
+      success: true,
+      data: {
+        homeworkId: homework._id,
+        homeworkTitle: homework.title,
+        className,
+        section: sectionName,
+        subjectName: homework.subjectId?.name ?? null,
+        subjectCode: homework.subjectId?.code ?? null,
+        dueDate: homework.dueDate,
+        summary: {
+          totalStudents,
+          submitted: submittedCount,
+          pending: Math.max(0, totalStudents - submittedCount),
+          percentage: pctFloor(submittedCount, totalStudents),
+        },
+        students: rows,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** GET /api/mobile/homework/:id/submissions/:studentId — Teacher: one student's submission */
+export const getMobileHomeworkSubmissionByStudent = async (req, res, next) => {
+  try {
+    const loaded = await loadHomeworkForTeacherAccess(req, req.params.id);
+    if (loaded.error) {
+      return res.status(loaded.error.status).json({
+        success: false,
+        message: loaded.error.message,
+      });
+    }
+
+    const { homework } = loaded;
+    const className = homework.classId?.name || "";
+    const sectionName = homework.sectionId?.name || "";
+
+    const student = await Student.findById(req.params.studentId)
+      .select("_id name admissionNumber rollNumber className section schoolId status")
+      .lean();
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student not found",
+      });
+    }
+
+    if (String(student.schoolId) !== String(homework.schoolId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Student is not in this school",
+      });
+    }
+
+    if (
+      student.className !== className ||
+      student.section !== sectionName ||
+      student.status !== "ACTIVE"
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Student is not in this homework class/section",
+      });
+    }
+
+    const submission = await HomeworkSubmission.findOne({
+      homeworkId: homework._id,
+      studentId: student._id,
+    }).lean();
+
+    const submissionOut = await serializeSubmissionForTeacher(submission);
+
+    return res.json({
+      success: true,
+      data: {
+        homeworkId: homework._id,
+        homeworkTitle: homework.title,
+        dueDate: homework.dueDate,
+        subjectName: homework.subjectId?.name ?? null,
+        subjectCode: homework.subjectId?.code ?? null,
+        student: {
+          studentId: student._id,
+          name: student.name,
+          admissionNumber: student.admissionNumber,
+          rollNumber: student.rollNumber || null,
+        },
+        hasSubmission: !!submission,
+        submission: submissionOut,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** GET /api/mobile/homework/:id/submission — Student/Parent views own submission */
+export const getMyMobileHomeworkSubmission = async (req, res, next) => {
+  try {
+    const role = roleNameOf(req);
+    if (role !== "Student" && role !== "Parent") {
+      return res.status(403).json({
+        success: false,
+        message: "Only students (or parent on behalf of child) can view homework submissions",
+      });
+    }
+
+    const student = await resolveStudentSelf(req);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found for this user",
+      });
+    }
+
+    const homework = await Homework.findById(req.params.id)
+      .populate("subjectId", "name code")
+      .select("_id title dueDate schoolId classId sectionId subjectId");
+
+    if (!homework) {
+      return res.status(404).json({
+        success: false,
+        message: "Homework not found",
+      });
+    }
+
+    if (String(homework.schoolId) !== String(student.schoolId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Not allowed to view this homework submission",
+      });
+    }
+
+    const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
+    const okClass = classIds.some((id) => String(id) === String(homework.classId));
+    const okSection = sectionIds.some((id) => String(id) === String(homework.sectionId));
+    if (!okClass || !okSection) {
+      return res.status(403).json({
+        success: false,
+        message: "This homework is not for your class/section",
+      });
+    }
+
+    const submission = await HomeworkSubmission.findOne({
+      homeworkId: homework._id,
+      studentId: student._id,
+    }).lean();
+
+    let submissionOut = null;
+    if (submission) {
+      const subFiles = await Promise.all(
+        (submission.files || []).map((p) => buildFileResource(p, true, true)),
+      );
+      submissionOut = {
+        _id: submission._id,
+        homeworkId: submission.homeworkId,
+        note: submission.note,
+        files: subFiles,
+        submittedAt: submission.submittedAt,
+        updatedAt: submission.updatedAt,
+      };
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        homeworkId: homework._id,
+        homeworkTitle: homework.title,
+        dueDate: homework.dueDate,
+        subjectName: homework.subjectId?.name ?? null,
+        subjectCode: homework.subjectId?.code ?? null,
+        hasSubmission: !!submission,
+        submission: submissionOut,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 /** POST /api/mobile/homework/:id/submit — Student/Parent uploads work */
 export const submitMobileHomework = async (req, res, next) => {
   try {

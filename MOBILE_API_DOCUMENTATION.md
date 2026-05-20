@@ -1841,6 +1841,176 @@ At least one of **note** (non-empty) or **files** is required on first submit. U
 
 **Base URL for files:** prepend your API host to paths like `/uploads/...` (same as other modules).
 
+### 10.6.1 Student / Parent — View my submission for one homework
+**GET** `/api/mobile/homework/:id/submission`  
+**Auth:** Student or Parent (child’s student record)
+
+Returns only **this student’s** submission for the homework `:id` (not the full homework detail). Use after submit or on a “Your submission” screen.
+
+**Success (200) — submitted:**
+```json
+{
+  "success": true,
+  "data": {
+    "homeworkId": "HOMEWORK_ID",
+    "homeworkTitle": "Math Chapter 5 Exercises",
+    "dueDate": "2026-04-02T23:59:00.000Z",
+    "subjectName": "Mathematics",
+    "subjectCode": "MATH",
+    "hasSubmission": true,
+    "submission": {
+      "_id": "SUBMISSION_ID",
+      "homeworkId": "HOMEWORK_ID",
+      "note": "Completed in notebook, photos attached",
+      "files": [
+        {
+          "id": "/uploads/1712345678-work.jpg",
+          "type": "file",
+          "url": "/uploads/1712345678-work.jpg",
+          "fileName": "1712345678-work.jpg",
+          "extension": "jpg",
+          "mimeType": "image/jpeg",
+          "kind": "image",
+          "sizeBytes": 245760,
+          "downloadable": true
+        }
+      ],
+      "submittedAt": "2026-03-29T12:00:00.000Z",
+      "updatedAt": "2026-03-29T12:00:00.000Z"
+    }
+  }
+}
+```
+
+**Success (200) — not submitted yet:**
+```json
+{
+  "success": true,
+  "data": {
+    "homeworkId": "HOMEWORK_ID",
+    "homeworkTitle": "Math Chapter 5 Exercises",
+    "dueDate": "2026-04-02T23:59:00.000Z",
+    "subjectName": "Mathematics",
+    "subjectCode": "MATH",
+    "hasSubmission": false,
+    "submission": null
+  }
+}
+```
+
+**Errors:** `403` (wrong role or homework not for student’s class), `404` (homework or student profile not found).
+
+### 10.6.2 Teacher — List all student submissions for one homework
+**GET** `/api/mobile/homework/:id/submissions`  
+**Auth:** Teacher (must be the teacher who **created** this homework)
+
+**Query (optional):**
+- `status` — `submitted` (only students who submitted), `pending` (not submitted yet), or omit for all
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "homeworkId": "HOMEWORK_ID",
+    "homeworkTitle": "Chapter 5: Multiplication Tables",
+    "className": "Grade 1",
+    "section": "A",
+    "subjectName": "Mathematics",
+    "subjectCode": "MATH",
+    "dueDate": "2026-04-10T00:00:00.000Z",
+    "summary": {
+      "totalStudents": 30,
+      "submitted": 18,
+      "pending": 12,
+      "percentage": 60
+    },
+    "students": [
+      {
+        "studentId": "STUDENT_ID",
+        "name": "Rahul Kumar",
+        "admissionNumber": "ADM001",
+        "rollNumber": "12",
+        "hasSubmission": true,
+        "submittedAt": "2026-03-29T12:00:00.000Z",
+        "submission": {
+          "_id": "SUBMISSION_ID",
+          "note": "Done in notebook",
+          "fileCount": 2,
+          "files": [
+            { "url": "/uploads/work1.jpg", "fileName": "work1.jpg" }
+          ],
+          "submittedAt": "2026-03-29T12:00:00.000Z",
+          "updatedAt": "2026-03-29T12:00:00.000Z"
+        }
+      },
+      {
+        "studentId": "STUDENT_ID_2",
+        "name": "Priya Sharma",
+        "admissionNumber": "ADM002",
+        "rollNumber": "13",
+        "hasSubmission": false,
+        "submittedAt": null,
+        "submission": null
+      }
+    ]
+  }
+}
+```
+
+Use this for the “Submissions” screen (who submitted / pending). File paths on the list are lightweight; open one student for full preview metadata.
+
+### 10.6.3 Teacher — One student’s submission (files + previews)
+**GET** `/api/mobile/homework/:id/submissions/:studentId`  
+**Auth:** Teacher (creator of the homework)
+
+Returns enriched `files` (same shape as student submission detail: `mimeType`, `kind`, `sizeBytes`, etc.) for opening/downloading.
+
+**Success (200) — submitted:**
+```json
+{
+  "success": true,
+  "data": {
+    "homeworkId": "HOMEWORK_ID",
+    "homeworkTitle": "Chapter 5: Multiplication Tables",
+    "dueDate": "2026-04-10T00:00:00.000Z",
+    "subjectName": "Mathematics",
+    "subjectCode": "MATH",
+    "student": {
+      "studentId": "STUDENT_ID",
+      "name": "Rahul Kumar",
+      "admissionNumber": "ADM001",
+      "rollNumber": "12"
+    },
+    "hasSubmission": true,
+    "submission": {
+      "_id": "SUBMISSION_ID",
+      "note": "Done in notebook",
+      "fileCount": 1,
+      "files": [
+        {
+          "id": "/uploads/work.jpg",
+          "type": "file",
+          "url": "/uploads/work.jpg",
+          "fileName": "work.jpg",
+          "extension": "jpg",
+          "mimeType": "image/jpeg",
+          "kind": "image",
+          "sizeBytes": 245760,
+          "downloadable": true
+        }
+      ],
+      "submittedAt": "2026-03-29T12:00:00.000Z",
+      "updatedAt": "2026-03-29T12:00:00.000Z"
+    }
+  }
+}
+```
+
+**Success (200) — not submitted:** `hasSubmission: false`, `submission: null`.
+
+**Errors:** `403` (not creator / student not in class), `404` (homework or student not found).
+
 ### 10.7 Student / Parent — Ask teacher a question (from homework detail)
 **POST** `/api/mobile/homework/:id/questions`  
 **Auth:** Student or Parent  
