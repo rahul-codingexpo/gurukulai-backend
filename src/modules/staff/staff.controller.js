@@ -64,6 +64,85 @@ const validateCreatePayload = (payload) => {
 };
 
 /**
+ * Create or update linked User login for staff (same rules as createStaff).
+ * - New login: requires both username and password.
+ * - Existing login: update username and/or password when provided.
+ */
+const syncStaffLoginUser = async ({
+  existingStaff,
+  username,
+  password,
+  name,
+  email,
+  phone,
+  designation,
+}) => {
+  const normalizedUsername = optionalTrimmedValue(username);
+  const normalizedPassword = optionalTrimmedValue(password);
+  const normalizedEmail = optionalTrimmedValue(email);
+  const normalizedPhone = optionalTrimmedValue(phone);
+  const normalizedDesignation = designation
+    ? String(designation).trim()
+    : existingStaff.designation;
+  const resolvedName = name ? String(name).trim() : existingStaff.name;
+  const schoolId = existingStaff.schoolId;
+
+  const resolveRole = async () => {
+    const role = await Role.findOne({ name: normalizedDesignation });
+    if (!role) {
+      const err = new Error("Role not found");
+      err.statusCode = 404;
+      throw err;
+    }
+    return role;
+  };
+
+  if (existingStaff.userId) {
+    const linkedUser = await User.findById(existingStaff.userId);
+    if (!linkedUser) {
+      existingStaff.userId = undefined;
+    } else {
+      const userUpdate = { name: resolvedName };
+      if (email !== undefined) {
+        userUpdate.email = normalizedEmail;
+      }
+      if (phone !== undefined) {
+        userUpdate.phone = normalizedPhone;
+      }
+      if (normalizedUsername) {
+        userUpdate.username = normalizedUsername;
+      }
+      if (normalizedPassword) {
+        userUpdate.password = await bcrypt.hash(normalizedPassword, 10);
+      }
+      if (designation) {
+        const role = await resolveRole();
+        userUpdate.roleId = role._id;
+      }
+      await User.findByIdAndUpdate(existingStaff.userId, userUpdate);
+      return existingStaff.userId;
+    }
+  }
+
+  if (normalizedUsername && normalizedPassword) {
+    const role = await resolveRole();
+    const hashedPassword = await bcrypt.hash(normalizedPassword, 10);
+    const user = await User.create({
+      name: resolvedName,
+      ...(normalizedEmail ? { email: normalizedEmail } : {}),
+      ...(normalizedPhone ? { phone: normalizedPhone } : {}),
+      username: normalizedUsername,
+      password: hashedPassword,
+      roleId: role._id,
+      schoolId,
+    });
+    return user._id;
+  }
+
+  return existingStaff.userId || null;
+};
+
+/**
  * Create Staff (Teacher / Principal / Staff)
  * Only Admin
  */
@@ -311,13 +390,46 @@ export const getStaff = async (req, res, next) => {
 
 export const updateStaff = async (req, res, next) => {
   try {
-    const updatePayload = { ...req.body };
+    const { username, password, schoolId: _schoolId, ...staffFields } = req.body;
+    const updatePayload = { ...staffFields };
     const existingStaff = await Staff.findById(req.params.id);
     if (!existingStaff) {
       return res.status(404).json({
         success: false,
         message: "Staff not found",
       });
+    }
+
+    if (updatePayload.email !== undefined) {
+      updatePayload.email = optionalTrimmedValue(updatePayload.email);
+    }
+    if (updatePayload.phone !== undefined) {
+      updatePayload.phone = optionalTrimmedValue(updatePayload.phone);
+    }
+
+    let linkedUserId;
+    try {
+      linkedUserId = await syncStaffLoginUser({
+        existingStaff,
+        username,
+        password,
+        name: updatePayload.name,
+        email: updatePayload.email,
+        phone: updatePayload.phone,
+        designation: updatePayload.designation,
+      });
+    } catch (err) {
+      if (err.statusCode === 404) {
+        return res.status(404).json({
+          success: false,
+          message: err.message,
+        });
+      }
+      throw err;
+    }
+
+    if (linkedUserId && String(linkedUserId) !== String(existingStaff.userId || "")) {
+      updatePayload.userId = linkedUserId;
     }
 
     if (updatePayload.salary !== undefined) {
@@ -351,7 +463,7 @@ export const updateStaff = async (req, res, next) => {
 
     const staff = await Staff.findByIdAndUpdate(req.params.id, updatePayload, {
       new: true,
-    });
+    }).populate("userId", "username email");
 
     if (
       updatePayload.photoUrl &&
