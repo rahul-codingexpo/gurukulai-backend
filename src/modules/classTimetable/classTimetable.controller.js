@@ -1,4 +1,10 @@
 import ClassTimetable from "./classTimetable.model.js";
+import {
+  resolveTeacherUserId,
+  findPopulatedEntryById,
+  enrichTimetableTeacherFields,
+  POPULATE_PATHS,
+} from "./classTimetable.utils.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -70,6 +76,15 @@ export const createClassTimetable = async (req, res, next) => {
       });
     }
 
+    const resolvedTeacherId = await resolveTeacherUserId(teacherId);
+    if (!resolvedTeacherId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid teacherId. Use the teacher's login (User) id, or a Staff id that has a linked user account.",
+      });
+    }
+
     const entry = await ClassTimetable.create({
       schoolId,
       classId,
@@ -80,12 +95,15 @@ export const createClassTimetable = async (req, res, next) => {
       day,
       roomNumber: roomNumber || "",
       joinLink: joinLink || "",
-      teacherId,
+      teacherId: resolvedTeacherId,
     });
+
+    const populated = await findPopulatedEntryById(entry._id);
+    await enrichTimetableTeacherFields(populated);
 
     res.status(201).json({
       success: true,
-      data: entry,
+      data: populated,
     });
   } catch (error) {
     next(error);
@@ -112,11 +130,10 @@ export const getClassTimetables = async (req, res, next) => {
     if (day) filter.day = day;
 
     const entries = await ClassTimetable.find(filter)
-      .populate("classId", "name")
-      .populate("sectionId", "name")
-      .populate("subjectId", "name code")
-      .populate("teacherId", "name")
+      .populate(POPULATE_PATHS)
       .sort({ day: 1, startTime: 1 });
+
+    await enrichTimetableTeacherFields(entries);
 
     res.json({
       success: true,
@@ -147,11 +164,15 @@ export const getClassTimetableByClassAndSection = async (req, res, next) => {
       classId,
       sectionId,
     })
-      .populate("classId", "name")
-      .populate("sectionId", "name")
-      .populate("subjectId", "name code type")
-      .populate("teacherId", "name")
+      .populate([
+        { path: "classId", select: "name" },
+        { path: "sectionId", select: "name" },
+        { path: "subjectId", select: "name code type" },
+        { path: "teacherId", select: "name" },
+      ])
       .sort({ day: 1, startTime: 1 });
+
+    await enrichTimetableTeacherFields(entries);
 
     res.json({
       success: true,
@@ -211,11 +232,12 @@ export const getClassTimetableById = async (req, res, next) => {
     const entry = await ClassTimetable.findOne({
       _id: req.params.id,
       schoolId,
-    })
-      .populate("classId", "name")
-      .populate("sectionId", "name")
-      .populate("subjectId", "name code type")
-      .populate("teacherId", "name");
+    }).populate([
+      { path: "classId", select: "name" },
+      { path: "sectionId", select: "name" },
+      { path: "subjectId", select: "name code type" },
+      { path: "teacherId", select: "name" },
+    ]);
 
     if (!entry) {
       return res.status(404).json({
@@ -223,6 +245,8 @@ export const getClassTimetableById = async (req, res, next) => {
         message: "Timetable entry not found",
       });
     }
+
+    await enrichTimetableTeacherFields(entry);
 
     res.json({
       success: true,
@@ -278,13 +302,26 @@ export const updateClassTimetable = async (req, res, next) => {
     if (day !== undefined) entry.day = day;
     if (roomNumber !== undefined) entry.roomNumber = roomNumber;
     if (joinLink !== undefined) entry.joinLink = joinLink;
-    if (teacherId !== undefined) entry.teacherId = teacherId;
+    if (teacherId !== undefined) {
+      const resolvedTeacherId = await resolveTeacherUserId(teacherId);
+      if (!resolvedTeacherId) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid teacherId. Use the teacher's login (User) id, or a Staff id that has a linked user account.",
+        });
+      }
+      entry.teacherId = resolvedTeacherId;
+    }
 
     await entry.save();
 
+    const populated = await findPopulatedEntryById(entry._id);
+    await enrichTimetableTeacherFields(populated);
+
     res.json({
       success: true,
-      data: entry,
+      data: populated,
     });
   } catch (error) {
     next(error);
