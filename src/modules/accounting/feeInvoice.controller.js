@@ -2,6 +2,7 @@ import FeeInvoice from "./feeInvoice.model.js";
 import FeeType from "./feeType.model.js";
 import Payment from "./payment.model.js";
 import Student from "../student/student.model.js";
+import { queueFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
 
 /** Money rounding (2 decimals) */
 export const roundMoney = (n) => Math.round(Number(n) * 100) / 100;
@@ -140,8 +141,12 @@ export const createInvoice = async (req, res, next) => {
       remarks: remarks ? String(remarks).trim() : "",
     });
     const populated = await FeeInvoice.findById(invoice._id)
-      .populate("studentId", "name className section rollNumber phone")
+      .populate(
+        "studentId",
+        "name admissionNumber className section rollNumber phone parents",
+      )
       .populate("feeTypeId", "name code amount period");
+    queueFeeInvoiceWhatsApp(invoice._id);
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
     next(error);
@@ -228,6 +233,7 @@ export const createBulkInvoices = async (req, res, next) => {
       });
       created++;
       invoices.push(inv);
+      queueFeeInvoiceWhatsApp(inv._id);
     }
     res.status(201).json({
       success: true,

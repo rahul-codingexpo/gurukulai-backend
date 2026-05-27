@@ -65,6 +65,33 @@ const feeInvoiceSchema = new mongoose.Schema(
     paidDate: { type: Date, default: null },
     period: { type: String, trim: true, default: "" },
     remarks: { type: String, trim: true, default: "" },
+    pdfUrl: { type: String, trim: true, default: undefined },
+    whatsappLastNotifiedAt: { type: Date, default: undefined },
+    whatsappTemplateKey: { type: String, trim: true, default: undefined },
+    whatsappNotificationLog: {
+      type: [
+        {
+          phone: String,
+          recipientType: String,
+          status: String,
+          error: String,
+        },
+      ],
+      default: undefined,
+    },
+    /** Set when due-date balance reminder WhatsApp was sent (once per invoice). */
+    whatsappDueReminderSentAt: { type: Date, default: undefined },
+    whatsappDueReminderLog: {
+      type: [
+        {
+          phone: String,
+          recipientType: String,
+          status: String,
+          error: String,
+        },
+      ],
+      default: undefined,
+    },
   },
   { timestamps: true }
 );

@@ -1,5 +1,6 @@
 import Payment from "./payment.model.js";
 import FeeInvoice from "./feeInvoice.model.js";
+import { queueFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
 
 const requireSchool = (req, res) => {
   if (!req.schoolId) {
@@ -99,6 +100,10 @@ export const recordPayment = async (req, res, next) => {
     const invPopulated = await FeeInvoice.findById(invoice._id)
       .populate("studentId", "name className section rollNumber")
       .populate("feeTypeId", "name code");
+
+    // Re-send invoice template on payment updates so family gets Partial/Paid status.
+    queueFeeInvoiceWhatsApp(invoice._id);
+
     res.status(201).json({
       success: true,
       data: {
