@@ -13,6 +13,7 @@ import {
 } from "./staffAttendance.controller.js";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
+import { injectSchool } from "../../middleware/injectSchool.middleware.js";
 
 const router = express.Router();
 
@@ -25,11 +26,12 @@ router.post(
   markStudentAttendance,
 );
 
-// Get attendance – Admin, Principal, Teacher (all/ filters), Student (own only)
+// Get attendance – Admin, Principal, Teacher, SuperAdmin (filters/roster), Student (own only)
 router.get(
   "/students",
   protect,
-  authorize("Admin", "Principal", "Teacher", "Student"),
+  authorize("Admin", "Principal", "Teacher", "Student", "SuperAdmin"),
+  injectSchool,
   getStudentAttendanceByDate,
 );
 

@@ -1,6 +1,7 @@
 import express from "express";
 import {
   createSubject,
+  createSubjectsBulk,
   getSubjects,
   deleteSubject,
   updateSubject,
@@ -12,7 +13,16 @@ import { injectSchool } from "../../middleware/injectSchool.middleware.js";
 
 const router = express.Router();
 
-// Create subject - Admin & Principal
+// Bulk create subject for multiple classes - Admin & Principal
+router.post(
+  "/bulk",
+  protect,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  createSubjectsBulk,
+);
+
+// Create subject (single class) - Admin & Principal
 router.post(
   "/",
   protect,

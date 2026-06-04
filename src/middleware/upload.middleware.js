@@ -18,9 +18,23 @@ const upload = createSpacesUpload({
   fileFilter,
 });
 
-// Study materials: allow PDFs and images
+// Study materials: documents + images (no per-file size cap in app — use reverse-proxy limits if needed)
+const STUDY_MATERIAL_ALLOWED_EXT = new Set([
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".ppt",
+  ".pptx",
+  ".xls",
+  ".xlsx",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+]);
+
 const studyMaterialFileFilter = (req, file, cb) => {
-  const allowed = [
+  const allowedMimes = [
     "image/png",
     "image/jpg",
     "image/jpeg",
@@ -28,12 +42,20 @@ const studyMaterialFileFilter = (req, file, cb) => {
     "application/pdf",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/octet-stream",
   ];
-  if (allowed.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only PDF, Word and image files allowed"), false);
+  const ext = path.extname(file.originalname || "").toLowerCase();
+  if (allowedMimes.includes(file.mimetype) || STUDY_MATERIAL_ALLOWED_EXT.has(ext)) {
+    return cb(null, true);
   }
+  return cb(
+    new Error("Only PDF, Word, PowerPoint, Excel and image files are allowed"),
+    false,
+  );
 };
 
 const TEN_MB = 10 * 1024 * 1024;
@@ -41,7 +63,6 @@ const TEN_MB = 10 * 1024 * 1024;
 export const uploadStudyMaterials = createSpacesUpload({
   folder: "uploads/study-materials",
   fileFilter: studyMaterialFileFilter,
-  limits: { fileSize: TEN_MB },
 });
 
 // Bulk student import: allow Excel + CSV files

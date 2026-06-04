@@ -3,6 +3,11 @@ import Staff from "../staff/staff.model.js";
 import StudentAttendance from "../attendance/studentAttendance.model.js";
 import StaffAttendance from "../attendance/staffAttendance.model.js";
 import mongoose from "mongoose";
+import {
+  parseDateOnlyLocal,
+  dateOnlyRange,
+  attendanceStudentIdKey,
+} from "../../utils/dateOnly.util.js";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 
@@ -41,12 +46,7 @@ const pct = (present, total) => {
   return Math.round((present / total) * 100);
 };
 
-const toDateOnly = (input) => {
-  const d = new Date(input);
-  if (Number.isNaN(d.getTime())) return null;
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
+const toDateOnly = (input) => parseDateOnlyLocal(input);
 
 const hhmmNow = () => {
   const d = new Date();
@@ -238,20 +238,29 @@ export const getTeacherStudentsForMarking = async (req, res, next) => {
       .sort({ section: 1, rollNumber: 1, name: 1 })
       .lean();
     const studentIds = students.map((s) => s._id);
+    const { start, end } = dateOnlyRange(selectedDate);
     const records = studentIds.length
       ? await StudentAttendance.find({
           schoolId,
-          date: selectedDate,
+          date: { $gte: start, $lte: end },
           studentId: { $in: studentIds },
         })
-          .select("studentId status markType updatedAt")
+          .populate("markedBy", "name")
+          .select("studentId status markType updatedAt markedBy")
           .lean()
       : [];
-    const byStudent = new Map(records.map((r) => [String(r.studentId), r]));
+    const byStudent = new Map(
+      records.map((r) => [attendanceStudentIdKey(r.studentId), r]),
+    );
 
     const mapped = students.map((s) => {
       const rec = byStudent.get(String(s._id));
       const markType = rec?.markType || rec?.status || null;
+      const markedByUser = rec?.markedBy;
+      const markedByName =
+        markedByUser && typeof markedByUser === "object"
+          ? markedByUser.name
+          : null;
       return {
         _id: s._id,
         name: s.name || null,
@@ -260,8 +269,14 @@ export const getTeacherStudentsForMarking = async (req, res, next) => {
         className: s.className || null,
         section: s.section || null,
         status: markType,
+        markedBy: markedByName,
+        markedByName,
         markedAt: rec?.updatedAt || null,
-        markedTime: rec?.updatedAt ? format12h(`${String(new Date(rec.updatedAt).getHours()).padStart(2, "0")}:${String(new Date(rec.updatedAt).getMinutes()).padStart(2, "0")}`) : null,
+        markedTime: rec?.updatedAt
+          ? format12h(
+              `${String(new Date(rec.updatedAt).getHours()).padStart(2, "0")}:${String(new Date(rec.updatedAt).getMinutes()).padStart(2, "0")}`,
+            )
+          : null,
       };
     });
 
@@ -346,11 +361,10 @@ export const teacherMarkStudentAttendance = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "date is required" });
     }
 
-    const dateOnly = new Date(date);
-    if (Number.isNaN(dateOnly.getTime())) {
+    const dateOnly = parseDateOnlyLocal(date);
+    if (!dateOnly) {
       return res.status(400).json({ success: false, message: "Invalid date" });
     }
-    dateOnly.setHours(0, 0, 0, 0);
 
     let normalizedEntries = [];
     if (Array.isArray(entries)) {
@@ -411,9 +425,10 @@ export const teacherMarkStudentAttendance = async (req, res, next) => {
 
     await StudentAttendance.bulkWrite(toUpsert);
 
+    const { start, end } = dateOnlyRange(dateOnly);
     const records = await StudentAttendance.find({
       schoolId,
-      date: dateOnly,
+      date: { $gte: start, $lte: end },
       studentId: { $in: normalizedEntries.map((e) => e.studentId) },
     })
       .populate("studentId", "name rollNumber className section")

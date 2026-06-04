@@ -1,5 +1,84 @@
 import StudentAttendance from "./studentAttendance.model.js";
 import Student from "../student/student.model.js";
+import Section from "../academic/section.model.js";
+import {
+  parseDateOnlyLocal,
+  dateOnlyRange,
+  attendanceStudentIdKey,
+} from "../../utils/dateOnly.util.js";
+
+const MANAGER_ROLES = ["Admin", "Principal", "SuperAdmin", "Teacher"];
+
+const toDateOnly = (input) => parseDateOnlyLocal(input);
+
+const displayAttendanceStatus = (record) => {
+  if (!record) return null;
+  const markType = record.markType;
+  if (markType && ["Present", "Absent", "Late"].includes(markType)) return markType;
+  return record.status || null;
+};
+
+/** Resolve roster students for web/mobile-aligned class+section filters. */
+const resolveStudentsForSectionFilter = async ({
+  schoolId,
+  sectionId,
+  className,
+  section,
+}) => {
+  if (sectionId) {
+    const sectionDoc = await Section.findOne({ _id: sectionId, schoolId })
+      .populate("classId", "name")
+      .lean();
+    if (!sectionDoc) return [];
+
+    const masterClass = String(sectionDoc.classId?.name || "").trim();
+    const masterSection = String(sectionDoc.name || "").trim();
+
+    let students = await Student.find({
+      schoolId,
+      ...(masterClass ? { className: masterClass } : {}),
+      ...(masterSection ? { section: masterSection } : {}),
+    })
+      .select("_id name rollNumber className section admissionNumber")
+      .sort({ rollNumber: 1, name: 1 })
+      .lean();
+
+    if (students.length === 0 && masterSection) {
+      const bySection = await Student.find({
+        schoolId,
+        section: masterSection,
+      })
+        .select("_id name rollNumber className section admissionNumber")
+        .sort({ rollNumber: 1, name: 1 })
+        .lean();
+
+      if (!masterClass) return bySection;
+
+      students = bySection.filter((s) => {
+        const cn = String(s.className || "").trim();
+        return (
+          cn === masterClass ||
+          cn.includes(masterClass) ||
+          masterClass.includes(cn)
+        );
+      });
+    }
+
+    return students;
+  }
+
+  if (className || section) {
+    const studentFilter = { schoolId };
+    if (className) studentFilter.className = String(className).trim();
+    if (section) studentFilter.section = String(section).trim();
+    return Student.find(studentFilter)
+      .select("_id name rollNumber className section admissionNumber")
+      .sort({ rollNumber: 1, name: 1 })
+      .lean();
+  }
+
+  return [];
+};
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -37,8 +116,13 @@ export const markStudentAttendance = async (req, res, next) => {
       });
     }
 
-    const dateOnly = new Date(date);
-    dateOnly.setHours(0, 0, 0, 0);
+    const dateOnly = toDateOnly(date);
+    if (!dateOnly) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date",
+      });
+    }
 
     if (entries && Array.isArray(entries)) {
       const toUpsert = entries.map((e) => ({
@@ -104,16 +188,14 @@ export const markStudentAttendance = async (req, res, next) => {
 
 /**
  * Get student attendance.
- * - date is optional; use dateFrom/dateTo for range, or omit for all (limited to last 365 days).
- * - If role is Student: returns only that student's attendance ("my attendance").
- * - If role is Admin/Principal/Teacher: can filter by date, studentId, className, section.
+ * - Student: own history (date range supported).
+ * - Admin/Principal/SuperAdmin/Teacher + date + sectionId/class: full class roster with status (incl. pending).
  */
 export const getStudentAttendanceByDate = async (req, res, next) => {
   try {
     const roleName = req.user?.roleId?.name;
     let schoolId = resolveSchoolId(req);
 
-    // Student viewing own attendance: resolve schoolId and studentId from Student linked to this user
     if (roleName === "Student") {
       const student = await Student.findOne({
         "studentLogin.userId": req.user._id,
@@ -125,7 +207,7 @@ export const getStudentAttendanceByDate = async (req, res, next) => {
         });
       }
       schoolId = student.schoolId;
-      req._resolvedStudentId = student._id; // so filter uses only this student
+      req._resolvedStudentId = student._id;
     }
 
     if (!schoolId) {
@@ -138,36 +220,126 @@ export const getStudentAttendanceByDate = async (req, res, next) => {
       });
     }
 
-    const { date, dateFrom, dateTo, studentId, className, section } = req.query;
+    const { date, dateFrom, dateTo, studentId, className, section, sectionId } =
+      req.query;
+
+    const dateOnly = date ? toDateOnly(date) : null;
+    const isManagerView =
+      MANAGER_ROLES.includes(roleName) &&
+      !req._resolvedStudentId &&
+      dateOnly &&
+      (sectionId || className || section);
+
+    if (isManagerView) {
+      const students = await resolveStudentsForSectionFilter({
+        schoolId,
+        sectionId,
+        className,
+        section,
+      });
+
+      if (!students.length) {
+        return res.json({
+          success: true,
+          data: [],
+          summary: {
+            total: 0,
+            present: 0,
+            absent: 0,
+            late: 0,
+            pending: 0,
+            marked: 0,
+          },
+        });
+      }
+
+      const studentIds = students.map((s) => s._id);
+      const { start, end } = dateOnlyRange(dateOnly);
+      const records = await StudentAttendance.find({
+        schoolId,
+        date: { $gte: start, $lte: end },
+        studentId: { $in: studentIds },
+      })
+        .populate("markedBy", "name email username")
+        .lean();
+
+      const byStudent = new Map(
+        records.map((r) => [attendanceStudentIdKey(r.studentId), r]),
+      );
+
+      const markedByLabel = (user) => {
+        if (!user || typeof user !== "object") return null;
+        const n = String(user.name || "").trim();
+        if (n) return n;
+        const u = String(user.username || "").trim();
+        if (u) return u;
+        const e = String(user.email || "").trim();
+        return e || null;
+      };
+
+      const data = students.map((s) => {
+        const rec = byStudent.get(attendanceStudentIdKey(s._id));
+        const status = displayAttendanceStatus(rec);
+        return {
+          _id: rec?._id,
+          date: dateOnly,
+          studentId: s._id,
+          studentName: s.name,
+          rollNumber: s.rollNumber,
+          admissionNumber: s.admissionNumber,
+          class: s.className,
+          section: s.section,
+          status: status || "Pending",
+          markedBy: markedByLabel(rec?.markedBy),
+          markedById: rec?.markedBy?._id,
+          isMarked: Boolean(rec),
+        };
+      });
+
+      const present = data.filter((r) => r.status === "Present").length;
+      const absent = data.filter((r) => r.status === "Absent").length;
+      const late = data.filter((r) => r.status === "Late").length;
+      const pending = data.filter((r) => r.status === "Pending").length;
+
+      return res.json({
+        success: true,
+        data,
+        summary: {
+          total: data.length,
+          present,
+          absent,
+          late,
+          pending,
+          marked: data.length - pending,
+        },
+      });
+    }
 
     const filter = { schoolId };
 
-    // Restrict to own record when role is Student
     if (req._resolvedStudentId) {
       filter.studentId = req._resolvedStudentId;
     } else if (studentId) {
       filter.studentId = studentId;
     }
 
-    // Date filter: single date, or range, or default last 365 days when no date given
-    if (date) {
-      const dateOnly = new Date(date);
-      dateOnly.setHours(0, 0, 0, 0);
-      filter.date = dateOnly;
+    if (dateOnly) {
+      const { start, end } = dateOnlyRange(dateOnly);
+      filter.date = { $gte: start, $lte: end };
     } else if (dateFrom || dateTo) {
       filter.date = {};
       if (dateFrom) {
-        const d = new Date(dateFrom);
-        d.setHours(0, 0, 0, 0);
-        filter.date.$gte = d;
+        const d = toDateOnly(dateFrom);
+        if (d) filter.date.$gte = d;
       }
       if (dateTo) {
-        const d = new Date(dateTo);
-        d.setHours(23, 59, 59, 999);
-        filter.date.$lte = d;
+        const d = toDateOnly(dateTo);
+        if (d) {
+          const { end } = dateOnlyRange(d);
+          filter.date.$lte = end;
+        }
       }
     } else {
-      // No date: last 365 days to avoid huge responses
       const end = new Date();
       const start = new Date();
       start.setDate(start.getDate() - 365);
@@ -175,19 +347,30 @@ export const getStudentAttendanceByDate = async (req, res, next) => {
       filter.date = { $gte: start, $lte: end };
     }
 
-    if (!req._resolvedStudentId && (className || section)) {
-      const studentFilter = { schoolId };
-      if (className) studentFilter.className = className;
-      if (section) studentFilter.section = section;
-      if (studentId) studentFilter._id = studentId;
-      const students = await Student.find(studentFilter).select("_id");
+    if (!req._resolvedStudentId && (sectionId || className || section)) {
+      const students = await resolveStudentsForSectionFilter({
+        schoolId,
+        sectionId,
+        className,
+        section,
+      });
       filter.studentId = { $in: students.map((s) => s._id) };
     }
 
     const records = await StudentAttendance.find(filter)
       .populate("studentId", "name rollNumber className section")
-      .populate("markedBy", "name")
+      .populate("markedBy", "name email username")
       .sort({ date: -1, "studentId.name": 1 });
+
+    const markedByLabel = (user) => {
+      if (!user || typeof user !== "object") return null;
+      return (
+        String(user.name || "").trim() ||
+        String(user.username || "").trim() ||
+        String(user.email || "").trim() ||
+        null
+      );
+    };
 
     const data = records.map((r) => ({
       _id: r._id,
@@ -196,10 +379,11 @@ export const getStudentAttendanceByDate = async (req, res, next) => {
       rollNumber: r.studentId?.rollNumber,
       class: r.studentId?.className,
       section: r.studentId?.section,
-      status: r.status,
-      markedBy: r.markedBy?.name,
+      status: displayAttendanceStatus(r) || r.status,
+      markedBy: markedByLabel(r.markedBy),
       studentId: r.studentId?._id,
       markedById: r.markedBy?._id,
+      isMarked: true,
     }));
 
     res.json({

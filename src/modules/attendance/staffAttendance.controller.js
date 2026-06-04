@@ -180,6 +180,7 @@ export const getStaffAttendanceByDate = async (req, res, next) => {
       name: r.staffId?.name,
       role: r.staffId?.designation,
       status: r.status,
+      markType: r.markType || r.status,
       entryTime: r.entryTime,
       exitTime: r.exitTime,
     }));
@@ -231,6 +232,7 @@ export const updateStaffAttendance = async (req, res, next) => {
       name: record.staffId?.name,
       role: record.staffId?.designation,
       status: record.status,
+      markType: record.markType || record.status,
       entryTime: record.entryTime,
       exitTime: record.exitTime,
     };

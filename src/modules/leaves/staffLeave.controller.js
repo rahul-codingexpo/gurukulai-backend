@@ -9,17 +9,25 @@ const resolveSchoolId = (req) => {
   return req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
 };
 
-/** Apply for leave (Staff applies own) or create (Admin/Principal for a staff) */
+/** Admin/Principal manage all school staff leaves; Staff/Teacher only their own. */
+const canManageSchoolStaffLeaves = (roleName) =>
+  ["Admin", "Principal", "SuperAdmin"].includes(roleName);
+
+const isSelfServiceStaffRole = (roleName) =>
+  ["Staff", "Teacher"].includes(roleName);
+
+const resolveLinkedStaff = async (userId) =>
+  Staff.findOne({ userId }).select("_id schoolId phone name designation");
+
+/** Apply for leave (Staff/Teacher own) or create on behalf (Admin/Principal/SuperAdmin). */
 export const createStaffLeave = async (req, res, next) => {
   try {
     const roleName = req.user?.roleId?.name;
     let schoolId = resolveSchoolId(req);
     let staffId = req.body.staffId;
 
-    if (["Staff", "Teacher", "Principal"].includes(roleName)) {
-      const staff = await Staff.findOne({ userId: req.user._id }).select(
-        "_id schoolId phone name"
-      );
+    if (isSelfServiceStaffRole(roleName)) {
+      const staff = await resolveLinkedStaff(req.user._id);
       if (!staff) {
         return res.status(404).json({
           success: false,
@@ -28,6 +36,26 @@ export const createStaffLeave = async (req, res, next) => {
       }
       schoolId = staff.schoolId;
       staffId = staff._id;
+    } else if (canManageSchoolStaffLeaves(roleName)) {
+      if (!staffId) {
+        return res.status(400).json({
+          success: false,
+          message: "staffId is required when creating leave for staff/teacher",
+        });
+      }
+      const staffQuery = { _id: staffId };
+      if (schoolId) staffQuery.schoolId = schoolId;
+      const staffMember = await Staff.findOne(staffQuery).select("_id schoolId");
+      if (!staffMember) {
+        return res.status(404).json({
+          success: false,
+          message: schoolId
+            ? "Staff member not found in this school"
+            : "Staff member not found (provide schoolId for SuperAdmin)",
+        });
+      }
+      schoolId = staffMember.schoolId;
+      staffId = staffMember._id;
     }
 
     if (!schoolId || !staffId) {
@@ -81,17 +109,15 @@ export const createStaffLeave = async (req, res, next) => {
   }
 };
 
-/** List: Staff/Teacher/Principal see own, Admin/Principal see all for school */
+/** List: Staff/Teacher see own; Admin/Principal/SuperAdmin see all for school */
 export const getStaffLeaves = async (req, res, next) => {
   try {
     const roleName = req.user?.roleId?.name;
     let schoolId = resolveSchoolId(req);
     let staffIdFilter = null;
 
-    if (["Staff", "Teacher", "Principal"].includes(roleName)) {
-      const staff = await Staff.findOne({ userId: req.user._id }).select(
-        "_id schoolId"
-      );
+    if (isSelfServiceStaffRole(roleName)) {
+      const staff = await resolveLinkedStaff(req.user._id);
       if (!staff) {
         return res.status(404).json({
           success: false,
@@ -138,10 +164,8 @@ export const getStaffLeaveById = async (req, res, next) => {
     let schoolId = resolveSchoolId(req);
     let staffIdFilter = null;
 
-    if (["Staff", "Teacher", "Principal"].includes(roleName)) {
-      const staff = await Staff.findOne({ userId: req.user._id }).select(
-        "_id schoolId"
-      );
+    if (isSelfServiceStaffRole(roleName)) {
+      const staff = await resolveLinkedStaff(req.user._id);
       if (!staff) {
         return res.status(404).json({
           success: false,
@@ -202,8 +226,8 @@ export const updateStaffLeave = async (req, res, next) => {
       });
     }
 
-    if (["Staff", "Teacher", "Principal"].includes(roleName)) {
-      const staff = await Staff.findOne({ userId: req.user._id }).select("_id");
+    if (isSelfServiceStaffRole(roleName)) {
+      const staff = await resolveLinkedStaff(req.user._id);
       if (!staff || !leave.staffId._id.equals(staff._id)) {
         return res.status(403).json({
           success: false,
@@ -309,21 +333,24 @@ export const deleteStaffLeave = async (req, res, next) => {
       });
     }
 
-    if (["Staff", "Teacher", "Principal"].includes(roleName)) {
-      const staff = await Staff.findOne({ userId: req.user._id }).select("_id");
+    if (isSelfServiceStaffRole(roleName)) {
+      const staff = await resolveLinkedStaff(req.user._id);
       if (!staff || !leave.staffId.equals(staff._id)) {
         return res.status(403).json({
           success: false,
           message: "You can only delete your own leave",
         });
       }
-    } else {
-      if (leave.schoolId.toString() !== schoolId?.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: "Leave not found in your school",
-        });
-      }
+    } else if (!canManageSchoolStaffLeaves(roleName)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to delete this leave",
+      });
+    } else if (leave.schoolId.toString() !== schoolId?.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Leave not found in your school",
+      });
     }
 
     await StaffLeave.findByIdAndDelete(req.params.id);
