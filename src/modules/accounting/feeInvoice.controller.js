@@ -83,6 +83,7 @@ export const createInvoice = async (req, res, next) => {
       period,
       remarks,
       discountPercent = 0,
+      status: requestedStatus,
     } = req.body || {};
     if (!studentId || !feeTypeId || amount == null || !dueDate) {
       return res.status(400).json({
@@ -124,6 +125,18 @@ export const createInvoice = async (req, res, next) => {
         message: "Invoice already exists for this student, fee type and period",
       });
     }
+    const allowedStatuses = ["Paid", "Pending", "Overdue", "Partial"];
+    const initialStatus = allowedStatuses.includes(requestedStatus)
+      ? requestedStatus
+      : "Pending";
+
+    let paid = 0;
+    let paidDate = null;
+    if (initialStatus === "Paid") {
+      paid = computed.amount;
+      paidDate = new Date();
+    }
+
     const invoiceNumber = await getNextInvoiceNumber(req.schoolId);
     const invoice = await FeeInvoice.create({
       schoolId: req.schoolId,
@@ -134,8 +147,9 @@ export const createInvoice = async (req, res, next) => {
       discountPercent: computed.discountPercent,
       discountAmount: computed.discountAmount,
       amount: computed.amount,
-      paid: 0,
-      status: "Pending",
+      paid,
+      status: initialStatus,
+      paidDate,
       dueDate: new Date(dueDate),
       period: periodStr,
       remarks: remarks ? String(remarks).trim() : "",

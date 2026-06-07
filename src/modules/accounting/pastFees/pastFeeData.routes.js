@@ -5,6 +5,7 @@ import { authorize } from "../../../middleware/role.middleware.js";
 import { injectSchool } from "../../../middleware/injectSchool.middleware.js";
 import {
   importPastFees,
+  createPastFeeRecord,
   listPastFeeImports,
   listPastFeeRecords,
   getStudentPastFeeSummary,
@@ -43,7 +44,17 @@ const uploadPastFeeFile = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
 
-// Endpoint 1: Bulk Import
+// Endpoint 1: Single record create
+router.post(
+  "/accounting/past-fees",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  createPastFeeRecord,
+);
+
+// Endpoint 2: Bulk Import
 router.post(
   "/accounting/past-fees/import",
   protect,
@@ -54,7 +65,7 @@ router.post(
   importPastFees,
 );
 
-// Endpoint 2: List Import History (Batches)
+// Endpoint 3: List Import History (Batches)
 router.get(
   "/accounting/past-fees/imports",
   protect,
@@ -64,7 +75,7 @@ router.get(
   listPastFeeImports,
 );
 
-// Endpoint 3: List Past Fee Records (with Filters)
+// Endpoint 4: List Past Fee Records (with Filters)
 router.get(
   "/accounting/past-fees",
   protect,
@@ -74,7 +85,7 @@ router.get(
   listPastFeeRecords,
 );
 
-// Optional Endpoint 4: Past Fee Summary by Student
+// Optional Endpoint 5: Past Fee Summary by Student
 router.get(
   "/accounting/past-fees/students/:studentId/summary",
   protect,

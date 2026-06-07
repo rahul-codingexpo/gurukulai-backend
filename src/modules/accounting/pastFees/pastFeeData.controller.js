@@ -328,6 +328,77 @@ export const importPastFees = async (req, res, next) => {
   }
 };
 
+export const createPastFeeRecord = async (req, res, next) => {
+  try {
+    const schoolId = req.schoolId;
+    if (!schoolId) return fail(res, 400, "School context missing");
+
+    const admissionNo = String(req.body?.admissionNumber || "").trim();
+    const sessionVal = String(req.body?.session || "").trim();
+    const dueAmountNum = parseNumber(req.body?.dueAmount);
+
+    if (!admissionNo) return fail(res, 400, "admissionNumber is required");
+    if (!sessionVal) return fail(res, 400, "session is required");
+    if (dueAmountNum === null || dueAmountNum < 0) {
+      return fail(res, 400, "dueAmount is required and must be 0 or greater");
+    }
+
+    const batch = await PastFeeImportBatch.create({
+      schoolId,
+      batchName: `Single entry · ${admissionNo} · ${new Date().toLocaleDateString("en-IN")}`,
+      session: sessionVal,
+      fileMeta: { filename: "single-entry", originalSize: 0 },
+      recordsRead: 1,
+      recordsImported: 0,
+      recordsSkipped: 0,
+      createdBy: req.user?._id,
+      importedOn: new Date(),
+    });
+
+    const row = {
+      AdmissionNo: admissionNo,
+      StudentName: req.body?.studentName || "",
+      Class: req.body?.className || "",
+      Section: req.body?.section || "",
+      Session: sessionVal,
+      DueAmount: req.body?.dueAmount,
+      PaidAmount: req.body?.paidAmount ?? 0,
+      DueDate: req.body?.dueDate || "",
+      Remarks: req.body?.remarks || "",
+    };
+
+    const { importedDocs, skipped } = await validateAndNormalizeBatchRows({
+      req,
+      rows: [row],
+      schoolId,
+      sessionOverride: sessionVal,
+      batch,
+    });
+
+    if (!importedDocs.length) {
+      await PastFeeImportBatch.deleteOne({ _id: batch._id });
+      return fail(
+        res,
+        400,
+        "Could not create record. Check admission number exists and student has class assigned.",
+      );
+    }
+
+    const [record] = await PastFeeRecord.insertMany(importedDocs);
+    batch.recordsImported = 1;
+    batch.recordsSkipped = skipped;
+    await batch.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Past fee record created",
+      data: { record, batchId: batch._id },
+    });
+  } catch (err) {
+    return fail(res, 400, err.message || "Failed to create past fee record");
+  }
+};
+
 export const listPastFeeImports = async (req, res, next) => {
   try {
     const schoolId = req.schoolId;
