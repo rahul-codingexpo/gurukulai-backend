@@ -1,5 +1,6 @@
 import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { ENV } from "../config/env.js";
+import { normalizeSpacesPublicUrl } from "./spacesPublicUrl.util.js";
 
 const region = ENV.DO_SPACES_REGION || "blr1";
 const bucket = String(ENV.DO_SPACES_BUCKET || "").trim();
@@ -61,9 +62,11 @@ const extractObjectKeyFromUrl = (fileUrl) => {
 
 export const deleteFromSpacesByUrl = async (fileUrl) => {
   if (!spacesClient || !bucket || !fileUrl) return false;
-  if (!/^https?:\/\//i.test(fileUrl)) return false;
 
-  const key = extractObjectKeyFromUrl(fileUrl);
+  const normalized = normalizeSpacesPublicUrl(fileUrl);
+  if (!/^https?:\/\//i.test(normalized)) return false;
+
+  const key = extractObjectKeyFromUrl(normalized);
   if (!key) return false;
 
   try {

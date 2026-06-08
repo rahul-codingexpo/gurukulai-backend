@@ -1,6 +1,14 @@
 import StudyMaterial from "./studyMaterial.model.js";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
+import { normalizeFileUrlList } from "../../utils/spacesPublicUrl.util.js";
+
+const toStudyMaterialResponse = (doc) => {
+  if (!doc) return doc;
+  const plain = typeof doc.toObject === "function" ? doc.toObject() : { ...doc };
+  plain.files = normalizeFileUrlList(plain.files);
+  return plain;
+};
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -85,7 +93,7 @@ export const createStudyMaterial = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      data: populated,
+      data: toStudyMaterialResponse(populated),
     });
   } catch (error) {
     next(error);
@@ -121,7 +129,7 @@ export const getStudyMaterials = async (req, res, next) => {
 
     res.json({
       success: true,
-      data: materials,
+      data: materials.map(toStudyMaterialResponse),
     });
   } catch (error) {
     next(error);
@@ -160,7 +168,7 @@ export const getStudyMaterialById = async (req, res, next) => {
 
     res.json({
       success: true,
-      data: material,
+      data: toStudyMaterialResponse(material),
     });
   } catch (error) {
     next(error);
@@ -227,7 +235,7 @@ export const updateStudyMaterial = async (req, res, next) => {
 
     res.json({
       success: true,
-      data: populated,
+      data: toStudyMaterialResponse(populated),
     });
   } catch (error) {
     next(error);
@@ -258,6 +266,10 @@ export const deleteStudyMaterial = async (req, res, next) => {
         success: false,
         message: "Study material not found",
       });
+    }
+
+    for (const fileUrl of deleted.files || []) {
+      await deleteFromSpacesByUrl(fileUrl);
     }
 
     res.json({

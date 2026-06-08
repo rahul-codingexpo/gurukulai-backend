@@ -1,6 +1,7 @@
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { S3Client } from "@aws-sdk/client-s3";
 import { ENV } from "../config/env.js";
+import { normalizeSpacesPublicUrl } from "./spacesPublicUrl.util.js";
 
 const region = ENV.DO_SPACES_REGION || "sfo3";
 const bucket = String(ENV.DO_SPACES_BUCKET || "").trim();
@@ -41,8 +42,13 @@ const s3 =
     : null;
 
 const publicFileUrl = (key) => {
-  const base = String(ENV.DO_SPACES_ENDPOINT || "").replace(/\/$/, "");
-  if (base) return `${base}/${key}`;
+  let base = String(ENV.DO_SPACES_ENDPOINT || "").trim().replace(/\/$/, "");
+  if (base) {
+    if (!/^https?:\/\//i.test(base)) {
+      base = `https://${base.replace(/^\/+/, "")}`;
+    }
+    return normalizeSpacesPublicUrl(`${base}/${key}`);
+  }
   return `https://${bucket}.${region}.digitaloceanspaces.com/${key}`;
 };
 
