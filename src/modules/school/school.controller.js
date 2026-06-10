@@ -138,6 +138,44 @@ export const updateSchool = async (req, res, next) => {
       update.qrCode = String(req.body.qrCode).trim();
     }
 
+    // Timetable template settings (Option D — Hybrid).
+    // Accepts JSON either in req.body.timetableSettings (object) or
+    // req.body.timetableSettingsJson (stringified JSON for multipart).
+    let parsedTimetableSettings = null;
+    if (update.timetableSettings && typeof update.timetableSettings === "string") {
+      try { parsedTimetableSettings = JSON.parse(update.timetableSettings); } catch (_) {}
+    } else if (update.timetableSettings && typeof update.timetableSettings === "object") {
+      parsedTimetableSettings = update.timetableSettings;
+    } else if (update.timetableSettingsJson) {
+      try { parsedTimetableSettings = JSON.parse(update.timetableSettingsJson); } catch (_) {}
+      delete update.timetableSettingsJson;
+    }
+
+    const overlayImageFile = req.files?.timetableTemplateImage?.[0] || null;
+    if (parsedTimetableSettings || overlayImageFile) {
+      const existingSettings = schoolDoc.timetableSettings?.toObject?.() || schoolDoc.timetableSettings || {};
+      const merged = {
+        ...existingSettings,
+        ...(parsedTimetableSettings || {}),
+        theme: {
+          ...(existingSettings.theme || {}),
+          ...((parsedTimetableSettings && parsedTimetableSettings.theme) || {}),
+        },
+        imageOverlay: {
+          ...(existingSettings.imageOverlay || {}),
+          ...((parsedTimetableSettings && parsedTimetableSettings.imageOverlay) || {}),
+        },
+      };
+      if (overlayImageFile) {
+        const previousUrl = existingSettings.imageOverlay?.imageUrl;
+        merged.imageOverlay.imageUrl = uploadedFileUrl(overlayImageFile);
+        if (previousUrl && previousUrl !== merged.imageOverlay.imageUrl) {
+          await deleteFromSpacesByUrl(previousUrl);
+        }
+      }
+      update.timetableSettings = merged;
+    }
+
     const school = await School.findByIdAndUpdate(req.params.id, update, {
       new: true,
     });

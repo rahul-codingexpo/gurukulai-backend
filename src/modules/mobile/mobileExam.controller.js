@@ -178,11 +178,26 @@ const studentCanAccessExam = (exam, classIds, sectionIds) => {
   return sectionIds.some((id) => String(id) === String(sec));
 };
 
+const paperTypeLabels = (subjectRow) => {
+  const labels = [];
+  if (subjectRow?.hasWritten !== false) labels.push("Theory");
+  if (subjectRow?.hasPractical) labels.push("Practical");
+  if (subjectRow?.hasOral) labels.push("Oral");
+  return labels.length ? labels : ["Theory"];
+};
+
 const marksBySubjectId = (subjects) => {
   const m = new Map();
   for (const s of subjects || []) {
     const sid = String(s.subjectId?._id ?? s.subjectId);
-    m.set(sid, { maxMarks: s.maxMarks, passMarks: s.passMarks });
+    m.set(sid, {
+      maxMarks: s.maxMarks,
+      passMarks: s.passMarks,
+      hasWritten: s.hasWritten !== false,
+      hasPractical: Boolean(s.hasPractical),
+      hasOral: Boolean(s.hasOral),
+      paperTypes: paperTypeLabels(s),
+    });
   }
   return m;
 };
@@ -348,19 +363,25 @@ export const getMobileExamById = async (req, res, next) => {
     const syllabus = (exam.syllabusUrl || "").trim();
     const instr = (exam.instructions || "").trim();
 
-    const scheduleRows = (exam.schedule || []).map((row) => {
+    const scheduleRows = (exam.schedule || []).flatMap((row) => {
       const sid = String(row.subjectId?._id ?? row.subjectId);
       const sub = row.subjectId;
-      const meta = marksMap.get(sid) || { maxMarks: null, passMarks: null };
+      const meta = marksMap.get(sid) || {
+        maxMarks: null,
+        passMarks: null,
+        paperTypes: ["Theory"],
+      };
       const subjectName = sub?.name || "";
       const subjectCode = sub?.code || "";
-      const examType =
-        (sub?.type || "").trim() || "Theory";
-      return {
+      const examType = (sub?.type || "").trim() || "Theory";
+      const papers = meta.paperTypes || ["Theory"];
+      return papers.map((paperType) => ({
         subjectId: sid,
         subject_name: subjectName,
         subject_code: subjectCode,
         exam_type: examType,
+        paper_type: paperType,
+        paper_types: papers,
         total_marks: meta.maxMarks,
         pass_marks: meta.passMarks,
         date: formatDDMMYYYY(row.examDate),
@@ -369,12 +390,14 @@ export const getMobileExamById = async (req, res, next) => {
         end_time: row.endTime,
         time_range: `${row.startTime} - ${row.endTime}`,
         icon_identifier: iconIdentifierFromSubject(subjectName, subjectCode),
-      };
+      }));
     }).sort((a, b) => {
       const ta = toDateOnly(a.examDate)?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
       const tb = toDateOnly(b.examDate)?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
       if (ta !== tb) return ta - tb;
-      return parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time);
+      const timeCmp = parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time);
+      if (timeCmp !== 0) return timeCmp;
+      return String(a.paper_type || "").localeCompare(String(b.paper_type || ""));
     });
 
     const data = {
@@ -402,6 +425,10 @@ export const getMobileExamById = async (req, res, next) => {
         exam_type: (s.subjectId?.type || "").trim() || "Theory",
         total_marks: s.maxMarks,
         pass_marks: s.passMarks,
+        has_theory: s.hasWritten !== false,
+        has_practical: Boolean(s.hasPractical),
+        has_oral: Boolean(s.hasOral),
+        paper_types: paperTypeLabels(s),
         icon_identifier: iconIdentifierFromSubject(
           s.subjectId?.name || "",
           s.subjectId?.code || "",

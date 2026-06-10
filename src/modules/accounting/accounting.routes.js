@@ -17,7 +17,12 @@ import {
   getInvoiceById,
   updateInvoice,
   deleteInvoice,
+  restoreInvoice,
 } from "./feeInvoice.controller.js";
+import {
+  listFeeAuditLogs,
+  getFeeAuditTimeline,
+} from "./feeAudit/feeAudit.controller.js";
 import {
   recordPayment,
   getPayments,
@@ -115,6 +120,13 @@ router.delete(
   injectSchool,
   deleteInvoice
 );
+router.post(
+  "/fee-invoices/:id/restore",
+  protect,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  restoreInvoice
+);
 
 // ---------- Payments ----------
 router.post(
@@ -178,6 +190,22 @@ router.put(
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
   rejectWalletPayment
+);
+
+// ---------- Fee Data History (read-only audit log) — before past-fee mounts ----------
+router.get(
+  "/accounting/fee-audit",
+  protect,
+  authorize("Admin", "Principal", "SuperAdmin"),
+  injectSchool,
+  listFeeAuditLogs,
+);
+router.get(
+  "/accounting/fee-audit/:sourceType/:sourceId",
+  protect,
+  authorize("Admin", "Principal", "SuperAdmin"),
+  injectSchool,
+  getFeeAuditTimeline,
 );
 
 // ---------- Past Fee Data (Old Dues Archive) ----------

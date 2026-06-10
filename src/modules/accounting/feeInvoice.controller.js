@@ -3,6 +3,25 @@ import FeeType from "./feeType.model.js";
 import Payment from "./payment.model.js";
 import Student from "../student/student.model.js";
 import { queueFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
+import { writeFeeAudit, diffTrackedFields } from "./feeAudit/feeAudit.service.js";
+
+const TRACKED_INVOICE_FIELDS = [
+  "amount",
+  "baseAmount",
+  "discountPercent",
+  "discountAmount",
+  "paid",
+  "status",
+  "dueDate",
+  "paidDate",
+  "period",
+  "remarks",
+];
+
+const populateInvoice = (q) =>
+  q
+    .populate("studentId", "name admissionNumber className section rollNumber phone parents")
+    .populate("feeTypeId", "name code amount period");
 
 /** Money rounding (2 decimals) */
 export const roundMoney = (n) => Math.round(Number(n) * 100) / 100;
@@ -154,12 +173,15 @@ export const createInvoice = async (req, res, next) => {
       period: periodStr,
       remarks: remarks ? String(remarks).trim() : "",
     });
-    const populated = await FeeInvoice.findById(invoice._id)
-      .populate(
-        "studentId",
-        "name admissionNumber className section rollNumber phone parents",
-      )
-      .populate("feeTypeId", "name code amount period");
+    const populated = await populateInvoice(FeeInvoice.findById(invoice._id));
+    await writeFeeAudit({
+      schoolId: req.schoolId,
+      sourceType: "FeeInvoice",
+      sourceId: invoice._id,
+      action: "created",
+      after: populated,
+      user: req.user,
+    });
     queueFeeInvoiceWhatsApp(invoice._id);
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
@@ -247,6 +269,15 @@ export const createBulkInvoices = async (req, res, next) => {
       });
       created++;
       invoices.push(inv);
+      const populatedInv = await populateInvoice(FeeInvoice.findById(inv._id)).lean();
+      await writeFeeAudit({
+        schoolId: req.schoolId,
+        sourceType: "FeeInvoice",
+        sourceId: inv._id,
+        action: "created",
+        after: populatedInv,
+        user: req.user,
+      });
       queueFeeInvoiceWhatsApp(inv._id);
     }
     res.status(201).json({
@@ -269,6 +300,7 @@ export const getInvoices = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
     await markOverdue(req.schoolId);
+    const includeDeleted = String(req.query.includeDeleted || "").toLowerCase() === "true";
     const {
       status,
       studentId,
@@ -280,6 +312,7 @@ export const getInvoices = async (req, res, next) => {
       limit = 20,
     } = req.query;
     const filter = { schoolId: req.schoolId };
+    if (!includeDeleted) filter.isDeleted = { $ne: true };
     if (status) filter.status = status;
     if (studentId) filter.studentId = studentId;
     if (feeTypeId) filter.feeTypeId = feeTypeId;
@@ -335,6 +368,7 @@ export const getInvoiceById = async (req, res, next) => {
     const invoice = await FeeInvoice.findOne({
       _id: req.params.id,
       schoolId: req.schoolId,
+      isDeleted: { $ne: true },
     })
       .populate("studentId", "name className section rollNumber phone")
       .populate("feeTypeId", "name code amount period")
@@ -365,10 +399,14 @@ export const updateInvoice = async (req, res, next) => {
     const invoice = await FeeInvoice.findOne({
       _id: req.params.id,
       schoolId: req.schoolId,
+      isDeleted: { $ne: true },
     });
     if (!invoice) {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
+    const beforeSnap = await populateInvoice(
+      FeeInvoice.findById(invoice._id),
+    ).lean();
     const { amount, baseAmount, dueDate, period, remarks, status, discountPercent } =
       req.body || {};
 
@@ -432,37 +470,87 @@ export const updateInvoice = async (req, res, next) => {
       invoice.status = "Partial";
     }
     await invoice.save();
-    const populated = await FeeInvoice.findById(invoice._id)
-      .populate("studentId", "name className section rollNumber phone")
-      .populate("feeTypeId", "name code amount period");
+    const populated = await populateInvoice(FeeInvoice.findById(invoice._id)).lean();
+    const changes = diffTrackedFields(beforeSnap, populated, TRACKED_INVOICE_FIELDS);
+    if (changes.length) {
+      await writeFeeAudit({
+        schoolId: req.schoolId,
+        sourceType: "FeeInvoice",
+        sourceId: invoice._id,
+        action: "updated",
+        before: beforeSnap,
+        after: populated,
+        changes,
+        user: req.user,
+      });
+    }
     res.json({ success: true, data: populated });
   } catch (error) {
     next(error);
   }
 };
 
-/** Delete invoice — Admin, Principal only. Block if has payments. */
+/** Soft delete invoice — Admin, Principal only. Record stays in Fee Data History. */
 export const deleteInvoice = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const count = await Payment.countDocuments({
-      invoiceId: req.params.id,
-      schoolId: req.schoolId,
-    });
-    if (count > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot delete: invoice has ${count} payment record(s). Set status to Cancelled instead.`,
-      });
-    }
-    const deleted = await FeeInvoice.findOneAndDelete({
+    const invoice = await FeeInvoice.findOne({
       _id: req.params.id,
       schoolId: req.schoolId,
+      isDeleted: { $ne: true },
     });
-    if (!deleted) {
+    if (!invoice) {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
+    const beforeSnap = await populateInvoice(FeeInvoice.findById(invoice._id)).lean();
+    invoice.isDeleted = true;
+    invoice.deletedAt = new Date();
+    invoice.deletedBy = req.user?._id;
+    await invoice.save();
+    await writeFeeAudit({
+      schoolId: req.schoolId,
+      sourceType: "FeeInvoice",
+      sourceId: invoice._id,
+      action: "deleted",
+      before: beforeSnap,
+      after: beforeSnap,
+      user: req.user,
+    });
     res.json({ success: true, message: "Invoice deleted" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Restore a soft-deleted invoice — Admin, Principal only. */
+export const restoreInvoice = async (req, res, next) => {
+  try {
+    if (!requireSchool(req, res)) return;
+    const invoice = await FeeInvoice.findOne({
+      _id: req.params.id,
+      schoolId: req.schoolId,
+      isDeleted: true,
+    });
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Deleted invoice not found",
+      });
+    }
+    invoice.isDeleted = false;
+    invoice.deletedAt = null;
+    invoice.deletedBy = null;
+    await invoice.save();
+    const populated = await populateInvoice(FeeInvoice.findById(invoice._id)).lean();
+    await writeFeeAudit({
+      schoolId: req.schoolId,
+      sourceType: "FeeInvoice",
+      sourceId: invoice._id,
+      action: "restored",
+      after: populated,
+      user: req.user,
+    });
+    res.json({ success: true, data: populated });
   } catch (error) {
     next(error);
   }

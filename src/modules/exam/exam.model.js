@@ -9,6 +9,10 @@ const examSubjectSchema = new mongoose.Schema(
     },
     maxMarks: { type: Number, required: true },
     passMarks: { type: Number, required: true },
+    /** Which paper types apply for this subject in this exam */
+    hasWritten: { type: Boolean, default: true },
+    hasPractical: { type: Boolean, default: false },
+    hasOral: { type: Boolean, default: false },
   },
   { _id: false },
 );

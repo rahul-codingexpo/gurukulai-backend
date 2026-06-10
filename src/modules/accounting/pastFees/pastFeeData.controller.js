@@ -3,6 +3,18 @@ import Student from "../../student/student.model.js";
 import ClassModel from "../../academic/class.model.js";
 import PastFeeImportBatch from "./pastFeeImportBatch.model.js";
 import PastFeeRecord from "./pastFeeRecord.model.js";
+import { writeFeeAudit, diffTrackedFields } from "../feeAudit/feeAudit.service.js";
+
+const TRACKED_PAST_FEE_FIELDS = [
+  "dueAmount",
+  "paidAmount",
+  "balance",
+  "dueDate",
+  "remarks",
+  "session",
+  "className",
+  "section",
+];
 
 const ok = (res, payload = {}) => res.json({ success: true, ...payload });
 const fail = (res, status, message, errors) =>
@@ -301,8 +313,19 @@ export const importPastFees = async (req, res, next) => {
 
     const importedCount = importedDocs.length;
 
+    let insertedDocs = [];
     if (importedDocs.length) {
-      await PastFeeRecord.insertMany(importedDocs);
+      insertedDocs = await PastFeeRecord.insertMany(importedDocs);
+      for (const doc of insertedDocs) {
+        await writeFeeAudit({
+          schoolId,
+          sourceType: "PastFeeRecord",
+          sourceId: doc._id,
+          action: "created",
+          after: doc.toObject(),
+          user: req.user,
+        });
+      }
     }
 
     batch.recordsImported = importedCount;
@@ -388,6 +411,15 @@ export const createPastFeeRecord = async (req, res, next) => {
     batch.recordsImported = 1;
     batch.recordsSkipped = skipped;
     await batch.save();
+
+    await writeFeeAudit({
+      schoolId,
+      sourceType: "PastFeeRecord",
+      sourceId: record._id,
+      action: "created",
+      after: record.toObject(),
+      user: req.user,
+    });
 
     return res.status(201).json({
       success: true,
@@ -476,7 +508,9 @@ export const listPastFeeRecords = async (req, res, next) => {
 
     const effectiveClassName = className || classNameFromClassId;
 
+    const includeDeleted = String(req.query.includeDeleted || "").toLowerCase() === "true";
     const match = { schoolId };
+    if (!includeDeleted) match.isDeleted = { $ne: true };
     if (session) match.session = session;
     if (effectiveClassName) match.className = effectiveClassName;
     if (section) match.section = section;
@@ -629,6 +663,178 @@ export const getStudentPastFeeSummary = async (req, res, next) => {
         })),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** Edit a single past-fee record. Updates due/paid/balance, dates, remarks etc. */
+export const updatePastFeeRecord = async (req, res, next) => {
+  try {
+    const schoolId = req.schoolId;
+    if (!schoolId) return fail(res, 400, "School context missing");
+
+    const record = await PastFeeRecord.findOne({
+      _id: req.params.id,
+      schoolId,
+      isDeleted: { $ne: true },
+    });
+    if (!record) return fail(res, 404, "Past fee record not found");
+
+    const before = record.toObject();
+
+    const setNumberIfPresent = (key, transform = (v) => v) => {
+      if (req.body?.[key] !== undefined && req.body?.[key] !== "") {
+        const num = parseNumber(req.body[key]);
+        if (num === null || num < 0) {
+          throw new Error(`${key} must be 0 or greater`);
+        }
+        record[key] = transform(num);
+      }
+    };
+
+    try {
+      setNumberIfPresent("dueAmount");
+      setNumberIfPresent("paidAmount");
+    } catch (e) {
+      return fail(res, 400, e.message);
+    }
+
+    if (req.body?.dueDate !== undefined) {
+      const d = req.body.dueDate ? parseDateOnly(req.body.dueDate) : null;
+      record.dueDate = d || null;
+    }
+    if (req.body?.remarks !== undefined) {
+      record.remarks = String(req.body.remarks || "").trim();
+    }
+    if (req.body?.session !== undefined && String(req.body.session).trim()) {
+      record.session = String(req.body.session).trim();
+    }
+    if (req.body?.className !== undefined && String(req.body.className).trim()) {
+      record.className = String(req.body.className).trim();
+    }
+    if (req.body?.section !== undefined) {
+      record.section = String(req.body.section || "").trim();
+    }
+
+    if (record.paidAmount > record.dueAmount) {
+      return fail(res, 400, "Paid amount cannot exceed due amount");
+    }
+
+    const requestedStatus = req.body?.status
+      ? String(req.body.status).trim()
+      : null;
+    if (requestedStatus) {
+      if (requestedStatus === "Paid") {
+        record.paidAmount = record.dueAmount;
+        record.balance = 0;
+      } else if (requestedStatus === "Unpaid") {
+        record.paidAmount = 0;
+        record.balance = record.dueAmount;
+      } else if (requestedStatus === "Partially Paid") {
+        if (record.paidAmount <= 0 || record.paidAmount >= record.dueAmount) {
+          return fail(
+            res,
+            400,
+            "Partially Paid requires paid amount greater than 0 and less than due amount",
+          );
+        }
+        record.balance = Math.max(0, record.dueAmount - record.paidAmount);
+      } else {
+        return fail(res, 400, "Invalid status. Use Paid, Unpaid, or Partially Paid");
+      }
+    } else {
+      record.balance = Math.max(0, record.dueAmount - record.paidAmount);
+    }
+
+    await record.save();
+    const after = record.toObject();
+    const changes = diffTrackedFields(before, after, TRACKED_PAST_FEE_FIELDS);
+    if (changes.length) {
+      await writeFeeAudit({
+        schoolId,
+        sourceType: "PastFeeRecord",
+        sourceId: record._id,
+        action: "updated",
+        before,
+        after,
+        changes,
+        user: req.user,
+      });
+    }
+
+    return ok(res, {
+      message: "Past fee record updated",
+      data: after,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** Soft delete a past fee record. */
+export const softDeletePastFeeRecord = async (req, res, next) => {
+  try {
+    const schoolId = req.schoolId;
+    if (!schoolId) return fail(res, 400, "School context missing");
+
+    const record = await PastFeeRecord.findOne({
+      _id: req.params.id,
+      schoolId,
+      isDeleted: { $ne: true },
+    });
+    if (!record) return fail(res, 404, "Past fee record not found");
+
+    const before = record.toObject();
+    record.isDeleted = true;
+    record.deletedAt = new Date();
+    record.deletedBy = req.user?._id;
+    await record.save();
+
+    await writeFeeAudit({
+      schoolId,
+      sourceType: "PastFeeRecord",
+      sourceId: record._id,
+      action: "deleted",
+      before,
+      after: before,
+      user: req.user,
+    });
+
+    return ok(res, { message: "Past fee record deleted" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** Restore a soft-deleted past fee record. */
+export const restorePastFeeRecord = async (req, res, next) => {
+  try {
+    const schoolId = req.schoolId;
+    if (!schoolId) return fail(res, 400, "School context missing");
+
+    const record = await PastFeeRecord.findOne({
+      _id: req.params.id,
+      schoolId,
+      isDeleted: true,
+    });
+    if (!record) return fail(res, 404, "Deleted past fee record not found");
+
+    record.isDeleted = false;
+    record.deletedAt = null;
+    record.deletedBy = null;
+    await record.save();
+
+    await writeFeeAudit({
+      schoolId,
+      sourceType: "PastFeeRecord",
+      sourceId: record._id,
+      action: "restored",
+      after: record.toObject(),
+      user: req.user,
+    });
+
+    return ok(res, { message: "Past fee record restored", data: record.toObject() });
   } catch (err) {
     next(err);
   }

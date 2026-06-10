@@ -9,6 +9,9 @@ import {
   listPastFeeImports,
   listPastFeeRecords,
   getStudentPastFeeSummary,
+  updatePastFeeRecord,
+  softDeletePastFeeRecord,
+  restorePastFeeRecord,
 } from "./pastFeeData.controller.js";
 
 const router = express.Router();
@@ -93,6 +96,36 @@ router.get(
   authorize("Admin", "Principal"),
   injectSchool,
   getStudentPastFeeSummary,
+);
+
+// Endpoint 6: Edit a single past fee record
+router.put(
+  "/accounting/past-fees/:id",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  updatePastFeeRecord,
+);
+
+// Endpoint 7: Soft delete a past fee record
+router.delete(
+  "/accounting/past-fees/:id",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  softDeletePastFeeRecord,
+);
+
+// Endpoint 8: Restore a soft-deleted past fee record
+router.post(
+  "/accounting/past-fees/:id/restore",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  restorePastFeeRecord,
 );
 
 export default router;

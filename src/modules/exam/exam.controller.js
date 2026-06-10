@@ -55,6 +55,9 @@ const normalizeExam = (examDoc) => {
       examType: (s.subjectId?.type || "").trim() || null,
       maxMarks: s.maxMarks,
       passMarks: s.passMarks,
+      hasWritten: s.hasWritten !== false,
+      hasPractical: Boolean(s.hasPractical),
+      hasOral: Boolean(s.hasOral),
     })),
     schedule: (e.schedule || []).map((x) => ({
       subjectId: x.subjectId?._id || x.subjectId,
@@ -98,6 +101,12 @@ const validateExamPayload = async (schoolId, payload) => {
     if (!s.subjectId || Number(s.maxMarks) <= 0) return "Invalid subject maxMarks";
     if (Number(s.passMarks) < 0 || Number(s.passMarks) > Number(s.maxMarks)) {
       return "passMarks must be between 0 and maxMarks";
+    }
+    const hasWritten = s.hasWritten !== false;
+    const hasPractical = Boolean(s.hasPractical);
+    const hasOral = Boolean(s.hasOral);
+    if (!hasWritten && !hasPractical && !hasOral) {
+      return "Each subject must have at least one paper type: Theory, Practical, or Oral";
     }
   }
 
@@ -147,6 +156,9 @@ export const createExam = async (req, res, next) => {
         subjectId: s.subjectId,
         maxMarks: Number(s.maxMarks),
         passMarks: Number(s.passMarks),
+        hasWritten: s.hasWritten !== false,
+        hasPractical: Boolean(s.hasPractical),
+        hasOral: Boolean(s.hasOral),
       })),
       schedule: payload.schedule.map((x) => ({
         subjectId: x.subjectId,
@@ -257,6 +269,9 @@ export const updateExam = async (req, res, next) => {
       subjectId: s.subjectId,
       maxMarks: Number(s.maxMarks),
       passMarks: Number(s.passMarks),
+      hasWritten: s.hasWritten !== false,
+      hasPractical: Boolean(s.hasPractical),
+      hasOral: Boolean(s.hasOral),
     }));
     existing.schedule = merged.schedule.map((x) => ({
       subjectId: x.subjectId,

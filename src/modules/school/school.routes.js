@@ -37,6 +37,7 @@ router.put(
     { name: "schoolLogo", maxCount: 1 },
     { name: "qrCode", maxCount: 1 },
     { name: "paymentQr", maxCount: 1 },
+    { name: "timetableTemplateImage", maxCount: 1 },
   ]),
   authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   updateSchool,
