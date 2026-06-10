@@ -13,8 +13,11 @@ const studentSchema = new mongoose.Schema(
     dob: Date,
     phone: String,
 
-    /** Student address/residence (optional) */
+    /** Student residential / current address (optional) */
     address: { type: String, default: "" },
+
+    /** Mailing / correspondence address (optional) */
+    correspondenceAddress: { type: String, default: "" },
 
     admissionNumber: {
       type: String,
@@ -104,6 +107,9 @@ const studentSchema = new mongoose.Schema(
     bloodGroup: String,
     height: String,
     weight: String,
+    caste: String,
+    religion: String,
+    category: String,
     visionLeft: String,
     visionRight: String,
     dentalHygiene: String,

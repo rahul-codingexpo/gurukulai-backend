@@ -198,6 +198,8 @@ export const listExams = async (req, res, next) => {
         className: e.classId?.name || null,
         sectionId: e.sectionId?._id || e.sectionId || null,
         sectionName: e.sectionId?.name || null,
+        createdAt: e.createdAt,
+        updatedAt: e.updatedAt,
       })),
     });
   } catch (error) {

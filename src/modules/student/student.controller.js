@@ -257,6 +257,7 @@ export const createAdmission = async (req, res, next) => {
       admissionDate,
       currentAddress,
       permanentAddress,
+      correspondenceAddress,
       route,
       group,
       referredBy,
@@ -284,6 +285,9 @@ export const createAdmission = async (req, res, next) => {
       bloodGroup,
       height,
       weight,
+      caste,
+      religion,
+      category,
       visionLeft,
       visionRight,
       dentalHygiene,
@@ -311,6 +315,9 @@ export const createAdmission = async (req, res, next) => {
     }
 
     const address = String(addressValue ?? "").trim();
+    const correspondenceAddr = String(
+      correspondenceAddress ?? req.body.correspondenceAddress ?? "",
+    ).trim();
 
     /* CHECK DUPLICATE ADMISSION */
 
@@ -340,6 +347,7 @@ export const createAdmission = async (req, res, next) => {
       section,
       admissionDate,
       address,
+      correspondenceAddress: correspondenceAddr,
       parents,
       previousSchool,
       documents: {
@@ -368,6 +376,9 @@ export const createAdmission = async (req, res, next) => {
       bloodGroup: toOptionalString(bloodGroup),
       height: toOptionalString(height),
       weight: toOptionalString(weight),
+      caste: toOptionalString(caste),
+      religion: toOptionalString(religion),
+      category: toOptionalString(category),
       visionLeft: toOptionalString(visionLeft),
       visionRight: toOptionalString(visionRight),
       dentalHygiene: toOptionalString(dentalHygiene),
@@ -559,7 +570,7 @@ export const createAdmission = async (req, res, next) => {
  * - studentPhone (if you want student login via phone)
  * - fatherEmail (for parent user email; placeholder will be used if missing)
  * - motherEmail (not used for login currently; included for future)
- * - currentAddress, permanentAddress (student residence)
+ * - currentAddress, permanentAddress (student residence), correspondenceAddress (mailing)
  *
  * Request (multipart/form-data):
  * - excelFile: Excel/CSV file
@@ -742,6 +753,9 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
         const bloodGroup = pick(row, ["bloodGroup", "Blood Group"]);
         const height = pick(row, ["height", "Height"]);
         const weight = pick(row, ["weight", "Weight"]);
+        const caste = pick(row, ["caste", "Caste", "cast"]);
+        const religion = pick(row, ["religion", "Religion"]);
+        const category = pick(row, ["category", "Category"]);
         const visionLeft = pick(row, ["visionLeft", "Vision Left"]);
         const visionRight = pick(row, ["visionRight", "Vision Right"]);
         const dentalHygiene = pick(row, ["dentalHygiene", "Dental Hygeine"]);
@@ -799,6 +813,13 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           ]),
         );
         const addressVal = currentAddr || permanentAddr || "";
+        const correspondenceAddr = toMaybeStr(
+          pick(row, [
+            "correspondenceAddress",
+            "Correspondence Address",
+            "correspondence address",
+          ]),
+        );
 
         // Create Student
         const student = await Student.create({
@@ -812,6 +833,7 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           section: toStr(section),
           admissionDate,
           address: addressVal,
+          correspondenceAddress: correspondenceAddr || "",
           parents: {
             father: {
               name: toStr(fatherName),
@@ -852,6 +874,9 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           bloodGroup: toMaybeStr(bloodGroup),
           height: toMaybeStr(height),
           weight: toMaybeStr(weight),
+          caste: toMaybeStr(caste),
+          religion: toMaybeStr(religion),
+          category: toMaybeStr(category),
           visionLeft: toMaybeStr(visionLeft),
           visionRight: toMaybeStr(visionRight),
           dentalHygiene: toMaybeStr(dentalHygiene),
@@ -1023,6 +1048,7 @@ export const updateStudent = async (req, res, next) => {
       section,
       currentAddress,
       permanentAddress,
+      correspondenceAddress,
       phone,
       admissionNumber,
       admissionDate,
@@ -1053,6 +1079,9 @@ export const updateStudent = async (req, res, next) => {
       bloodGroup,
       height,
       weight,
+      caste,
+      religion,
+      category,
       visionLeft,
       visionRight,
       dentalHygiene,
@@ -1097,6 +1126,10 @@ export const updateStudent = async (req, res, next) => {
     } else if (currentAddress !== undefined || permanentAddress !== undefined) {
       const addrVal = currentAddress ?? permanentAddress ?? "";
       student.address = String(addrVal).trim();
+    }
+
+    if (correspondenceAddress !== undefined) {
+      student.correspondenceAddress = String(correspondenceAddress ?? "").trim();
     }
 
     // Persist additional editable fields (used by admission edit UI)
@@ -1158,6 +1191,9 @@ export const updateStudent = async (req, res, next) => {
     if (bloodGroup !== undefined) student.bloodGroup = toOptionalString(bloodGroup);
     if (height !== undefined) student.height = toOptionalString(height);
     if (weight !== undefined) student.weight = toOptionalString(weight);
+    if (caste !== undefined) student.caste = toOptionalString(caste);
+    if (religion !== undefined) student.religion = toOptionalString(religion);
+    if (category !== undefined) student.category = toOptionalString(category);
     if (visionLeft !== undefined) student.visionLeft = toOptionalString(visionLeft);
     if (visionRight !== undefined) student.visionRight = toOptionalString(visionRight);
     if (dentalHygiene !== undefined) student.dentalHygiene = toOptionalString(dentalHygiene);
