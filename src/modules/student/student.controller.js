@@ -998,7 +998,7 @@ export const getStudentById = async (req, res, next) => {
     const schoolId = resolveSchoolId(req);
     const studentId = req.params.id;
 
-    const student = await Student.findOne({ _id: studentId, schoolId });
+    const student = await Student.findOne({ _id: studentId, schoolId }).lean();
 
     if (!student) {
       return res.status(404).json({
@@ -1007,9 +1007,29 @@ export const getStudentById = async (req, res, next) => {
       });
     }
 
+    const studentUserId = student.studentLogin?.userId;
+    const parentUserId = student.parentLogin?.userId;
+
+    const [studentLoginUser, parentLoginUser] = await Promise.all([
+      studentUserId
+        ? User.findOne({ _id: studentUserId, schoolId })
+            .select("email phone username name")
+            .lean()
+        : null,
+      parentUserId
+        ? User.findOne({ _id: parentUserId, schoolId })
+            .select("email phone username name")
+            .lean()
+        : null,
+    ]);
+
     res.json({
       success: true,
-      data: student,
+      data: {
+        ...student,
+        studentLoginUser,
+        parentLoginUser,
+      },
     });
   } catch (error) {
     next(error);
@@ -1050,6 +1070,7 @@ export const updateStudent = async (req, res, next) => {
       permanentAddress,
       correspondenceAddress,
       phone,
+      email,
       admissionNumber,
       admissionDate,
       route,
@@ -1239,8 +1260,56 @@ export const updateStudent = async (req, res, next) => {
       student.parents.anniversaryDate = toOptionalDate(parentsAnniversaryDate);
     }
 
-    // Persist login references (no credential/user creation in PUT).
-    if (studentLogin && typeof studentLogin === "object") {
+    // Student login: create linked user or update credentials on edit.
+    if (studentLogin?.type === "NEW_USER") {
+      const role = await Role.findOne({ name: "Student" });
+      if (!role) {
+        return res.status(500).json({
+          success: false,
+          message: "Student role not found",
+        });
+      }
+
+      const linkedUserId = student.studentLogin?.userId;
+      const studentPhone =
+        effectivePhone !== undefined && effectivePhone !== null
+          ? String(effectivePhone).trim() || undefined
+          : student.phone;
+
+      if (linkedUserId) {
+        const user = await User.findOne({ _id: linkedUserId, schoolId });
+        if (user) {
+          if (name) user.name = name;
+          if (studentPhone !== undefined) user.phone = studentPhone;
+          if (email !== undefined && String(email).trim()) {
+            user.email = String(email).trim();
+          }
+          if (student.admissionNumber) user.username = student.admissionNumber;
+          if (studentLogin.password && String(studentLogin.password).trim()) {
+            user.password = await bcrypt.hash(String(studentLogin.password).trim(), 10);
+          }
+          await user.save();
+          student.studentLogin = { enabled: true, userId: user._id };
+        }
+      } else {
+        const passwordPlain =
+          (typeof studentLogin?.password === "string" && studentLogin.password.trim()) ||
+          resolveDefaultPassword("student");
+        const password = await bcrypt.hash(passwordPlain, 10);
+        const user = await User.create({
+          name: name || student.name,
+          username: student.admissionNumber,
+          phone: studentPhone,
+          email:
+            (email && String(email).trim()) ||
+            buildPlaceholderEmail("student", student.admissionNumber),
+          password,
+          roleId: role._id,
+          schoolId,
+        });
+        student.studentLogin = { enabled: true, userId: user._id };
+      }
+    } else if (studentLogin && typeof studentLogin === "object") {
       student.studentLogin = student.studentLogin || {};
       if (studentLogin.enabled !== undefined) {
         student.studentLogin.enabled = Boolean(studentLogin.enabled);
@@ -1248,14 +1317,79 @@ export const updateStudent = async (req, res, next) => {
       if (studentLogin.userId) {
         student.studentLogin.userId = studentLogin.userId;
       }
+    } else if (email && student.studentLogin?.userId) {
+      const user = await User.findOne({ _id: student.studentLogin.userId, schoolId });
+      if (user && String(email).trim()) {
+        user.email = String(email).trim();
+        await user.save();
+      }
     }
-    if (parentLogin && typeof parentLogin === "object") {
+
+    // Parent login: create linked user or update credentials on edit.
+    if (parentLogin?.type === "NEW_USER" && parents?.father?.phone) {
+      const role = await Role.findOne({ name: "Parent" });
+      if (!role) {
+        return res.status(500).json({
+          success: false,
+          message: "Parent role not found",
+        });
+      }
+
+      const linkedParentUserId = student.parentLogin?.userId;
+      if (linkedParentUserId) {
+        const user = await User.findOne({ _id: linkedParentUserId, schoolId });
+        if (user) {
+          if (parents.father.name) user.name = parents.father.name;
+          user.phone = parents.father.phone;
+          user.username = parents.father.phone;
+          if (parents.father.email && String(parents.father.email).trim()) {
+            user.email = String(parents.father.email).trim();
+          }
+          if (parentLogin.password && String(parentLogin.password).trim()) {
+            user.password = await bcrypt.hash(String(parentLogin.password).trim(), 10);
+          }
+          await user.save();
+          student.parentLogin = { enabled: true, userId: user._id };
+        }
+      } else {
+        let user = await User.findOne({
+          $or: [{ phone: parents.father.phone }, { username: parents.father.phone }],
+          schoolId,
+        });
+
+        if (!user) {
+          const passwordPlain =
+            (typeof parentLogin?.password === "string" && parentLogin.password.trim()) ||
+            resolveDefaultPassword("parent");
+          const password = await bcrypt.hash(passwordPlain, 10);
+          user = await User.create({
+            name: parents.father.name,
+            username: parents.father.phone,
+            phone: parents.father.phone,
+            email:
+              parents?.father?.email ||
+              buildPlaceholderEmail("parent", parents.father.phone),
+            password,
+            roleId: role._id,
+            schoolId,
+          });
+        }
+
+        student.parentLogin = { enabled: true, userId: user._id };
+      }
+    } else if (parentLogin && typeof parentLogin === "object") {
       student.parentLogin = student.parentLogin || {};
       if (parentLogin.enabled !== undefined) {
         student.parentLogin.enabled = Boolean(parentLogin.enabled);
       }
       if (parentLogin.userId) {
         student.parentLogin.userId = parentLogin.userId;
+      }
+    } else if (parents?.father?.email && student.parentLogin?.userId) {
+      const user = await User.findOne({ _id: student.parentLogin.userId, schoolId });
+      if (user && String(parents.father.email).trim()) {
+        user.email = String(parents.father.email).trim();
+        await user.save();
       }
     }
 

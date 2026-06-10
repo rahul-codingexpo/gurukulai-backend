@@ -219,6 +219,176 @@ export const listExams = async (req, res, next) => {
   }
 };
 
+const PRESCHOOL_CLASS_ORDER = ["NUR", "LKG", "UKG"];
+const ROMAN_CLASS_ORDER = {
+  I: 1,
+  II: 2,
+  III: 3,
+  IV: 4,
+  V: 5,
+  VI: 6,
+  VII: 7,
+  VIII: 8,
+  IX: 9,
+  X: 10,
+  XI: 11,
+  XII: 12,
+};
+
+const timeToMinutes = (value) => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return 0;
+  return Number(match[1]) * 60 + Number(match[2]);
+};
+
+const formatTime12Hour = (value) => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return raw;
+  const hours24 = Number(match[1]);
+  const minutes = match[2];
+  const suffix = hours24 >= 12 ? "p.m" : "a.m";
+  const hours12 = hours24 % 12 || 12;
+  return `${hours12}:${minutes} ${suffix}`;
+};
+
+const getShiftKey = (startTime, cutoffMinutes = 11 * 60 + 15) =>
+  timeToMinutes(startTime) < cutoffMinutes ? "1st" : "2nd";
+
+const sortClassLabel = (a, b) => {
+  const left = String(a || "").trim().toUpperCase();
+  const right = String(b || "").trim().toUpperCase();
+  const leftPre = PRESCHOOL_CLASS_ORDER.indexOf(left);
+  const rightPre = PRESCHOOL_CLASS_ORDER.indexOf(right);
+  if (leftPre !== -1 || rightPre !== -1) {
+    if (leftPre === -1) return 1;
+    if (rightPre === -1) return -1;
+    return leftPre - rightPre;
+  }
+  const leftNum = ROMAN_CLASS_ORDER[left] || Number.parseInt(left, 10) || 999;
+  const rightNum = ROMAN_CLASS_ORDER[right] || Number.parseInt(right, 10) || 999;
+  return leftNum - rightNum;
+};
+
+const buildShiftTimingLabel = (entries) => {
+  if (!entries.length) return null;
+  const starts = entries.map((e) => e.startTime).sort();
+  const ends = entries.map((e) => e.endTime).sort();
+  return `${formatTime12Hour(starts[0])} to ${formatTime12Hour(ends[ends.length - 1])}`;
+};
+
+export const getExamDateSheet = async (req, res, next) => {
+  try {
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) return res.status(400).json({ success: false, message: "School context missing" });
+
+    const { sessionId, examName } = req.query;
+    if (!examName || !String(examName).trim()) {
+      return res.status(400).json({ success: false, message: "examName is required" });
+    }
+
+    const filter = { schoolId, name: String(examName).trim() };
+    if (sessionId) filter.sessionId = sessionId;
+
+    const exams = await Exam.find(filter)
+      .populate("sessionId", "name")
+      .populate("classId", "name")
+      .populate("sectionId", "name")
+      .populate("schedule.subjectId", "name")
+      .lean();
+
+    if (!exams.length) {
+      return res.status(404).json({ success: false, message: "No exams found for this program" });
+    }
+
+    const classColumnMap = new Map();
+    for (const exam of exams) {
+      const className = exam.classId?.name || "Unknown";
+      const sectionName = exam.sectionId?.name;
+      const key = sectionName ? `${className}__${sectionName}` : className;
+      const label = sectionName ? `${className} (${sectionName})` : className;
+      classColumnMap.set(key, label);
+    }
+
+    const classKeys = [...classColumnMap.keys()].sort((a, b) =>
+      sortClassLabel(classColumnMap.get(a), classColumnMap.get(b)),
+    );
+    const classes = classKeys.map((key) => ({ key, label: classColumnMap.get(key) }));
+
+    const grid = new Map();
+    const shiftBuckets = { "1st": [], "2nd": [] };
+
+    for (const exam of exams) {
+      const className = exam.classId?.name || "Unknown";
+      const sectionName = exam.sectionId?.name;
+      const classKey = sectionName ? `${className}__${sectionName}` : className;
+
+      for (const sch of exam.schedule || []) {
+        const date = toDateOnly(sch.examDate);
+        if (!date) continue;
+        const dateKey = date.toISOString().slice(0, 10);
+        const shift = getShiftKey(sch.startTime);
+        const subjectName = sch.subjectId?.name || "Subject";
+
+        if (!grid.has(dateKey)) {
+          grid.set(dateKey, { "1st": new Map(), "2nd": new Map() });
+        }
+        const day = grid.get(dateKey);
+        if (!day[shift].has(classKey)) day[shift].set(classKey, []);
+        day[shift].get(classKey).push(subjectName);
+        shiftBuckets[shift].push({ startTime: sch.startTime, endTime: sch.endTime });
+      }
+    }
+
+    const rowColors = ["#dbeafe", "#fecdd3", "#bbf7d0", "#e9d5ff", "#fde68a", "#cffafe"];
+    const sortedDates = [...grid.keys()].sort();
+
+    const rows = sortedDates.map((dateKey, idx) => {
+      const d = new Date(dateKey);
+      const dayLabel = d.toLocaleDateString("en-US", { weekday: "long" }).toUpperCase();
+      const dateLabel = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+
+      const buildShiftCells = (shift) => {
+        const cells = {};
+        const shiftMap = grid.get(dateKey)[shift];
+        for (const classKey of classKeys) {
+          const subjects = shiftMap.get(classKey) || [];
+          cells[classKey] = subjects.join(" + ");
+        }
+        return cells;
+      };
+
+      return {
+        date: dateKey,
+        dayLabel,
+        dateLabel,
+        color: rowColors[idx % rowColors.length],
+        shifts: {
+          "1st": buildShiftCells("1st"),
+          "2nd": buildShiftCells("2nd"),
+        },
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        examName: String(examName).trim(),
+        sessionName: exams[0]?.sessionId?.name || "",
+        classes,
+        shiftTimings: {
+          first: buildShiftTimingLabel(shiftBuckets["1st"]) || "08:30 a.m to 11:00 a.m",
+          second: buildShiftTimingLabel(shiftBuckets["2nd"]) || "11:30 a.m to 01:30 p.m",
+        },
+        rows,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getExamById = async (req, res, next) => {
   try {
     const schoolId = resolveSchoolId(req);
