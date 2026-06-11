@@ -64,6 +64,15 @@
 
 import mongoose from "mongoose";
 
+const passwordResetSchema = new mongoose.Schema(
+  {
+    otpHash: { type: String, default: undefined },
+    expiresAt: { type: Date, default: undefined },
+    lastSentAt: { type: Date, default: undefined },
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -124,9 +133,9 @@ const userSchema = new mongoose.Schema(
     },
 
     passwordReset: {
-      otpHash: { type: String, select: false, default: undefined },
-      expiresAt: { type: Date, select: false, default: undefined },
-      lastSentAt: { type: Date, select: false, default: undefined },
+      type: passwordResetSchema,
+      select: false,
+      default: undefined,
     },
   },
   { timestamps: true },

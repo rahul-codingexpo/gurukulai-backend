@@ -37,7 +37,7 @@ const findUserByLoginId = async (resolvedLoginId) => {
       { username: resolvedLoginId },
     ],
   })
-    .select("+password +passwordReset.otpHash +passwordReset.expiresAt +passwordReset.lastSentAt")
+    .select("+password +passwordReset")
     .populate("roleId");
 
   if (directUser) return directUser;
@@ -53,7 +53,7 @@ const findUserByLoginId = async (resolvedLoginId) => {
   if (!linkedStudent?.studentLogin?.userId) return null;
 
   return User.findById(linkedStudent.studentLogin.userId)
-    .select("+password +passwordReset.otpHash +passwordReset.expiresAt +passwordReset.lastSentAt")
+    .select("+password +passwordReset")
     .populate("roleId");
 };
 
@@ -192,7 +192,7 @@ export const loginService = async (body = {}) => {
     }
 
     user = await User.findOne({ email: normalizedEmail })
-      .select("+password +passwordReset.otpHash +passwordReset.expiresAt +passwordReset.lastSentAt")
+      .select("+password +passwordReset")
       .populate("roleId");
 
     if (!user) {
