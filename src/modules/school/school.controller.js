@@ -2,6 +2,7 @@ import School from "./school.model.js";
 import mongoose from "mongoose";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
+import { sendSchoolWelcomeEmail } from "../../services/email.service.js";
 
 /**
  * Create School
@@ -37,6 +38,13 @@ export const createSchool = async (req, res, next) => {
       ...req.body,
       logo: logoPath,
     });
+
+    // Send onboarding welcome email to the school email asynchronously
+    if (school.email) {
+      sendSchoolWelcomeEmail(school).catch((err) => {
+        console.error(`Failed to send onboarding welcome email to school: ${school.email}`, err);
+      });
+    }
 
     res.status(201).json({
       success: true,

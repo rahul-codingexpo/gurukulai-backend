@@ -2,6 +2,7 @@ import School from "./school.model.js";
 import User from "../user/user.model.js";
 import Role from "../auth/role.model.js";
 import bcrypt from "bcryptjs";
+import { sendSchoolWelcomeEmail } from "../../services/email.service.js";
 
 export const onboardSchool = async (req, res, next) => {
   try {
@@ -14,6 +15,13 @@ export const onboardSchool = async (req, res, next) => {
       email,
       phone,
     });
+
+    // Send onboarding welcome email to the school email asynchronously
+    if (school.email) {
+      sendSchoolWelcomeEmail(school).catch((err) => {
+        console.error(`Failed to send onboarding welcome email to school: ${school.email}`, err);
+      });
+    }
 
     /* 2️⃣ Find Admin Role */
     const adminRole = await Role.findOne({

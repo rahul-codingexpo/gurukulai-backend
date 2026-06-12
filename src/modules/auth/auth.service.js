@@ -4,6 +4,7 @@ import Staff from "../staff/staff.model.js";
 import { comparePassword } from "../../utils/hash.js";
 import { generateToken } from "../../utils/jwt.js";
 import crypto from "crypto";
+import { sendOtpEmail } from "../../services/email.service.js";
 
 const sha256 = (value) =>
   crypto.createHash("sha256").update(String(value)).digest("hex");
@@ -256,6 +257,13 @@ export const forgotPasswordService = async (body = {}) => {
   // Enforce identifier type by role (same as login)
   enforceIdentifierByRole({ user, resolvedLoginId });
 
+  // Check if user has an email registered
+  if (!user.email) {
+    const err = new Error("No registered email address found for this account. Please contact your school administrator.");
+    err.statusCode = 400;
+    throw err;
+  }
+
   // Basic cooldown: 30s
   const now = Date.now();
   const lastSent = user.passwordReset?.lastSentAt?.getTime?.() || 0;
@@ -270,6 +278,9 @@ export const forgotPasswordService = async (body = {}) => {
     lastSentAt: new Date(now),
   };
   await user.save();
+
+  // Send the OTP verification email
+  await sendOtpEmail(user.email, otp);
 
   // In production you'd send OTP via SMS/Email. For now, return it for testing.
   const includeOtp =

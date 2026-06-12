@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "backfill:fee-invoice-discount": "node scripts/backfill-feeinvoice-discount.mjs",
     "test:whatsapp-invoice": "node scripts/test-fee-invoice-whatsapp.mjs",
+    "test:school-welcome": "node scripts/test-school-welcome.js",
     "diagnose:whysms": "node scripts/diagnose-whysms.mjs",
     "fee:due-reminders": "node scripts/run-fee-due-reminders.mjs"
   },
