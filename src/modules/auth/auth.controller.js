@@ -1,5 +1,4 @@
-import { loginService } from "./auth.service.js";
-import { forgotPasswordService, resetPasswordService } from "./auth.service.js";
+import { loginService, forgotPasswordService, resetPasswordService, verifyOtpService } from "./auth.service.js";
 
 export const login = async (req, res, next) => {
   try {
@@ -28,6 +27,19 @@ export const login = async (req, res, next) => {
 export const forgotPassword = async (req, res, next) => {
   try {
     const data = await forgotPasswordService(req.body);
+    res.json({
+      success: true,
+      message: data.message,
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const verifyOtp = async (req, res, next) => {
+  try {
+    const data = await verifyOtpService(req.body);
     res.json({
       success: true,
       message: data.message,

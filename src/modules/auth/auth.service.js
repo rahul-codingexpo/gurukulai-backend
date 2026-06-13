@@ -264,10 +264,10 @@ export const forgotPasswordService = async (body = {}) => {
     throw err;
   }
 
-  // Basic cooldown: 30s
+  // Basic cooldown: 60s
   const now = Date.now();
   const lastSent = user.passwordReset?.lastSentAt?.getTime?.() || 0;
-  if (lastSent && now - lastSent < 30_000) {
+  if (lastSent && now - lastSent < 60_000) {
     return { message: "OTP recently sent. Please wait and try again." };
   }
 
@@ -290,6 +290,46 @@ export const forgotPasswordService = async (body = {}) => {
     message: "If account exists, OTP has been sent",
     ...(includeOtp ? { otp } : {}),
   };
+};
+
+export const verifyOtpService = async (body = {}) => {
+  const { loginId, email, phone, username, otp } = body;
+  const resolvedLoginId = loginId || email || phone || username;
+
+  if (!resolvedLoginId) throw new Error("loginId is required");
+  if (!otp) throw new Error("otp is required");
+
+  const user = await findUserByLoginId(resolvedLoginId);
+
+  if (!user) {
+    const err = new Error("Invalid OTP");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Enforce identifier type by role (same as login)
+  enforceIdentifierByRole({ user, resolvedLoginId });
+
+  const otpHash = user.passwordReset?.otpHash;
+  const expiresAt = user.passwordReset?.expiresAt;
+  if (!otpHash || !expiresAt) {
+    const err = new Error("Invalid OTP");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (Date.now() > expiresAt.getTime()) {
+    const err = new Error("OTP expired");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (sha256(otp) !== otpHash) {
+    const err = new Error("Invalid OTP");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return { message: "OTP verified successfully" };
 };
 
 export const resetPasswordService = async (body = {}) => {
