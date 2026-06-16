@@ -16,10 +16,38 @@ const resolveSchoolId = (req) => {
 };
 
 const toDateOnly = (value) => {
+  if (!value) return null;
+  const str = String(value).trim();
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const y = Number(isoMatch[1]);
+    const m = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    const d = new Date(y, m - 1, day);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+
+const toLocalDateKey = (value) => {
+  const d = toDateOnly(value);
+  if (!d) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const formatDateSheetLabels = (dateKey) => {
+  const [y, m, day] = String(dateKey).split("-").map(Number);
+  if (!y || !m || !day) return { dateLabel: "", dayLabel: "" };
+  const d = new Date(y, m - 1, day);
+  return {
+    dateLabel: `${String(day).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y}`,
+    dayLabel: d.toLocaleDateString("en-US", { weekday: "long" }).toUpperCase(),
+  };
 };
 
 const isClass11Or12 = (className) => /\b(11|12)\b/.test(String(className || ""));
@@ -325,9 +353,8 @@ export const getExamDateSheet = async (req, res, next) => {
       const classKey = sectionName ? `${className}__${sectionName}` : className;
 
       for (const sch of exam.schedule || []) {
-        const date = toDateOnly(sch.examDate);
-        if (!date) continue;
-        const dateKey = date.toISOString().slice(0, 10);
+        const dateKey = toLocalDateKey(sch.examDate);
+        if (!dateKey) continue;
         const shift = getShiftKey(sch.startTime);
         const subjectName = sch.subjectId?.name || "Subject";
 
@@ -345,9 +372,7 @@ export const getExamDateSheet = async (req, res, next) => {
     const sortedDates = [...grid.keys()].sort();
 
     const rows = sortedDates.map((dateKey, idx) => {
-      const d = new Date(dateKey);
-      const dayLabel = d.toLocaleDateString("en-US", { weekday: "long" }).toUpperCase();
-      const dateLabel = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+      const { dateLabel, dayLabel } = formatDateSheetLabels(dateKey);
 
       const buildShiftCells = (shift) => {
         const cells = {};
@@ -496,7 +521,7 @@ export const getExamStudents = async (req, res, next) => {
     }
 
     const students = await Student.find(studentFilter)
-      .select("name admissionNumber rollNumber className section")
+      .select("name admissionNumber rollNumber className section documents.studentPhoto")
       .sort({ section: 1, rollNumber: 1, admissionNumber: 1, name: 1 })
       .lean();
 

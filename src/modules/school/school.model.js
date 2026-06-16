@@ -106,6 +106,21 @@ const schoolSchema = new mongoose.Schema(
       type: String,
     },
 
+    registrationNumber: {
+      type: String,
+      trim: true,
+    },
+
+    udiseNumber: {
+      type: String,
+      trim: true,
+    },
+
+    runUnder: {
+      type: String,
+      trim: true,
+    },
+
     status: {
       type: String,
       enum: ["ACTIVE", "INACTIVE"],
