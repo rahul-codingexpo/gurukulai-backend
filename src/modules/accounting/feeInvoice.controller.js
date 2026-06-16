@@ -2,7 +2,7 @@ import FeeInvoice from "./feeInvoice.model.js";
 import FeeType from "./feeType.model.js";
 import Payment from "./payment.model.js";
 import Student from "../student/student.model.js";
-import { queueFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
+import { notifyFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
 import { writeFeeAudit, diffTrackedFields } from "./feeAudit/feeAudit.service.js";
 
 const TRACKED_INVOICE_FIELDS = [
@@ -182,7 +182,6 @@ export const createInvoice = async (req, res, next) => {
       after: populated,
       user: req.user,
     });
-    queueFeeInvoiceWhatsApp(invoice._id);
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
     next(error);
@@ -278,7 +277,6 @@ export const createBulkInvoices = async (req, res, next) => {
         after: populatedInv,
         user: req.user,
       });
-      queueFeeInvoiceWhatsApp(inv._id);
     }
     res.status(201).json({
       success: true,
@@ -355,6 +353,57 @@ export const getInvoices = async (req, res, next) => {
           totalPages: Math.ceil(total / Math.max(1, parseInt(limit, 10))),
         },
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Send fee invoice WhatsApp for one or more invoices (manual — not on create). */
+export const sendInvoicesWhatsApp = async (req, res, next) => {
+  try {
+    if (!requireSchool(req, res)) return;
+    const { invoiceIds } = req.body || {};
+    if (!Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "invoiceIds array is required",
+      });
+    }
+
+    const uniqueIds = [...new Set(invoiceIds.map((id) => String(id)))];
+    const invoices = await FeeInvoice.find({
+      _id: { $in: uniqueIds },
+      schoolId: req.schoolId,
+      isDeleted: { $ne: true },
+      status: { $ne: "Cancelled" },
+    })
+      .select("_id")
+      .lean();
+
+    if (invoices.length !== uniqueIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more invoices were not found or cannot be sent",
+      });
+    }
+
+    const results = [];
+    for (const inv of invoices) {
+      // eslint-disable-next-line no-await-in-loop
+      results.push(await notifyFeeInvoiceWhatsApp(inv._id));
+    }
+
+    const sent = results.filter((r) => r && !r.skipped).length;
+    const skipped = results.filter((r) => r?.skipped).length;
+
+    res.json({
+      success: true,
+      data: { results, sent, skipped },
+      message:
+        sent > 0
+          ? `WhatsApp sent for ${sent} invoice(s)${skipped ? `, ${skipped} skipped` : ""}`
+          : "No WhatsApp messages were sent",
     });
   } catch (error) {
     next(error);

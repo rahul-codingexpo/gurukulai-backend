@@ -18,6 +18,7 @@ import {
   updateInvoice,
   deleteInvoice,
   restoreInvoice,
+  sendInvoicesWhatsApp,
 } from "./feeInvoice.controller.js";
 import {
   listFeeAuditLogs,
@@ -98,6 +99,13 @@ router.get(
   authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   injectSchool,
   getInvoices
+);
+router.post(
+  "/fee-invoices/send-whatsapp",
+  protect,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  sendInvoicesWhatsApp
 );
 router.get(
   "/fee-invoices/:id",
