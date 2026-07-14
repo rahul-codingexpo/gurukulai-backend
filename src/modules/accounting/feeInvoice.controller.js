@@ -103,6 +103,8 @@ export const createInvoice = async (req, res, next) => {
       remarks,
       discountPercent = 0,
       status: requestedStatus,
+      paidAmount,
+      paid: paidFromBody,
     } = req.body || {};
     if (!studentId || !feeTypeId || amount == null || !dueDate) {
       return res.status(400).json({
@@ -117,17 +119,17 @@ export const createInvoice = async (req, res, next) => {
         message: "discountPercent must be between 0 and 100",
       });
     }
-    if (Number(amount) <= 0) {
+    if (Number(amount) < 0) {
       return res.status(400).json({
         success: false,
-        message: "amount (base before discount) must be greater than 0",
+        message: "amount (base before discount) must be 0 or greater",
       });
     }
     const computed = computeInvoiceAmounts(amount, pct);
-    if (computed.amount <= 0) {
+    if (computed.amount < 0) {
       return res.status(400).json({
         success: false,
-        message: "Final payable after discount must be greater than 0",
+        message: "Final payable after discount cannot be negative",
       });
     }
     const periodStr = period ? String(period).trim() : "";
@@ -145,15 +147,54 @@ export const createInvoice = async (req, res, next) => {
       });
     }
     const allowedStatuses = ["Paid", "Pending", "Overdue", "Partial"];
-    const initialStatus = allowedStatuses.includes(requestedStatus)
+    let initialStatus = allowedStatuses.includes(requestedStatus)
       ? requestedStatus
       : "Pending";
 
     let paid = 0;
     let paidDate = null;
+    const requestedPaidRaw = paidAmount != null ? paidAmount : paidFromBody;
+    const requestedPaid =
+      requestedPaidRaw != null && requestedPaidRaw !== ""
+        ? Number(requestedPaidRaw)
+        : null;
+
     if (initialStatus === "Paid") {
       paid = computed.amount;
       paidDate = new Date();
+    } else if (initialStatus === "Partial") {
+      if (requestedPaid == null || Number.isNaN(requestedPaid) || requestedPaid <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "paidAmount is required and must be greater than 0 for Partial status",
+        });
+      }
+      if (requestedPaid >= computed.amount) {
+        if (computed.amount <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Cannot mark Partial when payable amount is 0",
+          });
+        }
+        paid = computed.amount;
+        paidDate = new Date();
+        initialStatus = "Paid";
+      } else {
+        paid = Math.round(requestedPaid * 100) / 100;
+        paidDate = new Date();
+        initialStatus = "Partial";
+      }
+    } else if (requestedPaid != null && !Number.isNaN(requestedPaid) && requestedPaid > 0) {
+      // Allow optional paid amount even if status wasn't Partial
+      if (requestedPaid >= computed.amount) {
+        paid = computed.amount;
+        paidDate = new Date();
+        initialStatus = "Paid";
+      } else {
+        paid = Math.round(requestedPaid * 100) / 100;
+        paidDate = new Date();
+        initialStatus = "Partial";
+      }
     }
 
     const invoiceNumber = await getNextInvoiceNumber(req.schoolId);
@@ -336,7 +377,7 @@ export const getInvoices = async (req, res, next) => {
     const skip = (Math.max(1, parseInt(page, 10)) - 1) * Math.max(1, parseInt(limit, 10));
     const total = await FeeInvoice.countDocuments(filter);
     const invoices = await FeeInvoice.find(filter)
-      .populate("studentId", "name className section rollNumber phone")
+      .populate("studentId", "name admissionNumber className section rollNumber phone parents")
       .populate("feeTypeId", "name code amount period")
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -419,7 +460,7 @@ export const getInvoiceById = async (req, res, next) => {
       schoolId: req.schoolId,
       isDeleted: { $ne: true },
     })
-      .populate("studentId", "name className section rollNumber phone")
+      .populate("studentId", "name admissionNumber className section rollNumber phone parents")
       .populate("feeTypeId", "name code amount period")
       .lean();
     if (!invoice) {

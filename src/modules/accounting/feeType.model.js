@@ -37,6 +37,16 @@ const feeTypeSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    /**
+     * Classes / grades this fee type applies to.
+     * Empty array = applies to all classes.
+     */
+    classIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Class",
+      },
+    ],
     status: {
       type: String,
       enum: ["Active", "Inactive"],
@@ -48,5 +58,6 @@ const feeTypeSchema = new mongoose.Schema(
 
 feeTypeSchema.index({ code: 1, schoolId: 1 }, { unique: true });
 feeTypeSchema.index({ schoolId: 1, status: 1 });
+feeTypeSchema.index({ schoolId: 1, classIds: 1 });
 
 export default mongoose.model("FeeType", feeTypeSchema);

@@ -1,5 +1,6 @@
 import FeeType from "./feeType.model.js";
 import FeeInvoice from "./feeInvoice.model.js";
+import ClassModel from "../academic/class.model.js";
 
 const requireSchool = (req, res) => {
   if (!req.schoolId) {
@@ -15,21 +16,45 @@ const requireSchool = (req, res) => {
   return true;
 };
 
+const normalizeClassIds = async (schoolId, classIds) => {
+  if (classIds == null) return [];
+  const raw = Array.isArray(classIds) ? classIds : [classIds];
+  const ids = [...new Set(raw.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!ids.length) return [];
+
+  const found = await ClassModel.find({
+    schoolId,
+    _id: { $in: ids },
+  })
+    .select("_id")
+    .lean();
+
+  if (found.length !== ids.length) {
+    const err = new Error("One or more classIds are invalid for this school");
+    err.statusCode = 400;
+    throw err;
+  }
+  return found.map((c) => c._id);
+};
+
+const populateFeeType = (q) =>
+  q.populate("classIds", "name sessionId");
+
 /** Create fee type — Admin, Principal, Accountant */
 export const createFeeType = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const { name, code, amount, period, description, icon } = req.body || {};
+    const { name, code, amount, period, description, icon, classIds } = req.body || {};
     if (!name || !code || amount == null || !period) {
       return res.status(400).json({
         success: false,
         message: "name, code, amount and period are required",
       });
     }
-    if (amount <= 0 || amount > 1000000) {
+    if (Number(amount) < 0 || Number(amount) > 1000000) {
       return res.status(400).json({
         success: false,
-        message: "amount must be greater than 0 and at most 10,00,000",
+        message: "amount must be between 0 and 10,00,000",
       });
     }
     const validPeriods = ["Monthly", "Quarterly", "Half-Yearly", "Yearly", "One-Time"];
@@ -49,6 +74,17 @@ export const createFeeType = async (req, res, next) => {
         message: `Fee type with code '${existing.code}' already exists in this school`,
       });
     }
+
+    let normalizedClassIds = [];
+    try {
+      normalizedClassIds = await normalizeClassIds(req.schoolId, classIds);
+    } catch (e) {
+      return res.status(e.statusCode || 400).json({
+        success: false,
+        message: e.message || "Invalid classIds",
+      });
+    }
+
     const feeType = await FeeType.create({
       schoolId: req.schoolId,
       name: String(name).trim(),
@@ -57,9 +93,11 @@ export const createFeeType = async (req, res, next) => {
       period,
       description: description ? String(description).trim() : "",
       icon: icon ? String(icon).trim() : "",
+      classIds: normalizedClassIds,
       status: "Active",
     });
-    res.status(201).json({ success: true, data: feeType });
+    const populated = await populateFeeType(FeeType.findById(feeType._id));
+    res.status(201).json({ success: true, data: populated });
   } catch (error) {
     next(error);
   }
@@ -69,7 +107,7 @@ export const createFeeType = async (req, res, next) => {
 export const getFeeTypes = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const { status, search } = req.query;
+    const { status, search, classId, className } = req.query;
     const filter = { schoolId: req.schoolId };
     if (status) filter.status = status;
     if (search && String(search).trim()) {
@@ -79,7 +117,40 @@ export const getFeeTypes = async (req, res, next) => {
         { code: new RegExp(s, "i") },
       ];
     }
-    const data = await FeeType.find(filter).sort({ name: 1 });
+
+    // When filtering by class: include fee types for that class OR all-classes (empty classIds)
+    if (classId) {
+      filter.$and = [
+        ...(filter.$and || []),
+        {
+          $or: [
+            { classIds: { $size: 0 } },
+            { classIds: classId },
+            { classIds: { $exists: false } },
+          ],
+        },
+      ];
+    } else if (className && String(className).trim()) {
+      const classes = await ClassModel.find({
+        schoolId: req.schoolId,
+        name: String(className).trim(),
+      })
+        .select("_id")
+        .lean();
+      const ids = classes.map((c) => c._id);
+      filter.$and = [
+        ...(filter.$and || []),
+        {
+          $or: [
+            { classIds: { $size: 0 } },
+            { classIds: { $exists: false } },
+            ...(ids.length ? [{ classIds: { $in: ids } }] : []),
+          ],
+        },
+      ];
+    }
+
+    const data = await populateFeeType(FeeType.find(filter).sort({ name: 1 }));
     res.json({ success: true, data });
   } catch (error) {
     next(error);
@@ -90,10 +161,12 @@ export const getFeeTypes = async (req, res, next) => {
 export const getFeeTypeById = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const feeType = await FeeType.findOne({
-      _id: req.params.id,
-      schoolId: req.schoolId,
-    });
+    const feeType = await populateFeeType(
+      FeeType.findOne({
+        _id: req.params.id,
+        schoolId: req.schoolId,
+      }),
+    );
     if (!feeType) {
       return res.status(404).json({ success: false, message: "Fee type not found" });
     }
@@ -107,7 +180,7 @@ export const getFeeTypeById = async (req, res, next) => {
 export const updateFeeType = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const { name, code, amount, period, description, icon, status } = req.body || {};
+    const { name, code, amount, period, description, icon, status, classIds } = req.body || {};
     const feeType = await FeeType.findOne({
       _id: req.params.id,
       schoolId: req.schoolId,
@@ -117,13 +190,33 @@ export const updateFeeType = async (req, res, next) => {
     }
     if (name !== undefined) feeType.name = String(name).trim();
     if (code !== undefined) feeType.code = String(code).trim().toUpperCase();
-    if (amount !== undefined) feeType.amount = Number(amount);
+    if (amount !== undefined) {
+      const amountNum = Number(amount);
+      if (Number.isNaN(amountNum) || amountNum < 0 || amountNum > 1000000) {
+        return res.status(400).json({
+          success: false,
+          message: "amount must be between 0 and 10,00,000",
+        });
+      }
+      feeType.amount = amountNum;
+    }
     if (period !== undefined) feeType.period = period;
     if (description !== undefined) feeType.description = String(description).trim();
     if (icon !== undefined) feeType.icon = String(icon).trim();
     if (status !== undefined) feeType.status = status;
+    if (classIds !== undefined) {
+      try {
+        feeType.classIds = await normalizeClassIds(req.schoolId, classIds);
+      } catch (e) {
+        return res.status(e.statusCode || 400).json({
+          success: false,
+          message: e.message || "Invalid classIds",
+        });
+      }
+    }
     await feeType.save();
-    res.json({ success: true, data: feeType });
+    const populated = await populateFeeType(FeeType.findById(feeType._id));
+    res.json({ success: true, data: populated });
   } catch (error) {
     next(error);
   }
