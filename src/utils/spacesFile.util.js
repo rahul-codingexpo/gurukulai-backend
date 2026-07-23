@@ -1,84 +1,33 @@
-import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { ENV } from "../config/env.js";
-import { normalizeSpacesPublicUrl } from "./spacesPublicUrl.util.js";
+import fs from "fs/promises";
+import path from "path";
+import { toLocalUploadPath, normalizeSpacesPublicUrl } from "./spacesPublicUrl.util.js";
 
-const region = ENV.DO_SPACES_REGION || "blr1";
-const bucket = String(ENV.DO_SPACES_BUCKET || "").trim();
+const uploadsRoot = () => path.resolve(process.cwd(), "uploads");
 
-const normalizeEndpoint = (value, bucketName, fallbackRegion) => {
-  try {
-    const parsed = new URL(value);
-    const host = parsed.hostname.toLowerCase();
-    const bucketPrefix = `${String(bucketName || "").toLowerCase()}.`;
-    if (bucketPrefix !== "." && host.startsWith(bucketPrefix)) {
-      parsed.hostname = host.slice(bucketPrefix.length);
-      parsed.pathname = "/";
-      return parsed.toString().replace(/\/$/, "");
-    }
-    return value;
-  } catch {
-    return `https://${fallbackRegion}.digitaloceanspaces.com`;
-  }
-};
-
-const endpoint = normalizeEndpoint(
-  ENV.DO_SPACES_ENDPOINT || `https://${region}.digitaloceanspaces.com`,
-  bucket,
-  region,
-);
-
-const hasSpacesConfig = Boolean(
-  ENV.DO_SPACES_KEY && ENV.DO_SPACES_SECRET && ENV.DO_SPACES_BUCKET,
-);
-
-const spacesClient = hasSpacesConfig
-  ? new S3Client({
-      region,
-      endpoint,
-      forcePathStyle: false,
-      credentials: {
-        accessKeyId: ENV.DO_SPACES_KEY,
-        secretAccessKey: ENV.DO_SPACES_SECRET,
-      },
-    })
-  : null;
-
-const extractObjectKeyFromUrl = (fileUrl) => {
-  if (!fileUrl || !bucket) return null;
-  try {
-    const url = new URL(fileUrl);
-    const parts = url.pathname.replace(/^\/+/, "").split("/");
-    if (!parts.length) return null;
-    // path-style endpoint => /bucket/key
-    if (parts[0] === bucket) {
-      return parts.slice(1).join("/");
-    }
-    // virtual-host endpoint => /key
-    return parts.join("/");
-  } catch {
-    return null;
-  }
-};
-
-export const deleteFromSpacesByUrl = async (fileUrl) => {
-  if (!spacesClient || !bucket || !fileUrl) return false;
-
+const resolveLocalFilePath = (fileUrl) => {
+  if (!fileUrl) return null;
   const normalized = normalizeSpacesPublicUrl(fileUrl);
-  if (!/^https?:\/\//i.test(normalized)) return false;
+  const local = toLocalUploadPath(normalized) || normalized;
 
-  const key = extractObjectKeyFromUrl(normalized);
-  if (!key) return false;
+  if (!local.startsWith("/uploads/") && local !== "/uploads") return null;
+
+  const rel = local.replace(/^\/+/, "");
+  const abs = path.resolve(process.cwd(), rel);
+  const root = uploadsRoot();
+  if (!abs.startsWith(root)) return null;
+  return abs;
+};
+
+/** Delete a file from local uploads (name kept for existing call sites). */
+export const deleteFromSpacesByUrl = async (fileUrl) => {
+  if (!fileUrl) return false;
+  const abs = resolveLocalFilePath(fileUrl);
+  if (!abs) return false;
 
   try {
-    await spacesClient.send(
-      new DeleteObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      }),
-    );
+    await fs.unlink(abs);
     return true;
   } catch {
     return false;
   }
 };
-

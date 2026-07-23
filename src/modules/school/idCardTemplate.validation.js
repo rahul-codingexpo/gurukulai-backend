@@ -30,16 +30,20 @@ const normalizeHexColor = (c) => {
 };
 
 /**
- * Accept only HTTPS URLs that point to this app's configured Spaces bucket.
+ * Accept local /uploads paths, or legacy Spaces HTTPS URLs if still configured.
  */
 export const isTrustedSpacesObjectUrl = (url) => {
   if (url == null || url === "") return true;
   if (typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (trimmed.startsWith("/uploads/") || trimmed === "/uploads") return true;
+  if (trimmed.startsWith("uploads/")) return true;
   try {
-    const u = new URL(url.trim());
+    const u = new URL(trimmed);
     if (u.protocol !== "https:") return false;
     const bucket = String(ENV.DO_SPACES_BUCKET || "").trim().toLowerCase();
     const region = String(ENV.DO_SPACES_REGION || "blr1").trim().toLowerCase();
+    // Without Spaces config, only local paths are trusted (handled above).
     if (!bucket) return false;
     const host = u.hostname.toLowerCase();
     if (host === `${bucket}.${region}.digitaloceanspaces.com`) return true;

@@ -1,3 +1,4 @@
+import path from "path";
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
@@ -20,7 +21,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use(morgan("dev"));
 
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
 
 /* ---------- Routes ---------- */
 app.use("/api", routes);

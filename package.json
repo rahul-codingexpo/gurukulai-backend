@@ -7,6 +7,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "backfill:fee-invoice-discount": "node scripts/backfill-feeinvoice-discount.mjs",
+    "migrate:spaces-urls": "node scripts/migrate-spaces-urls-to-local.mjs",
     "test:whatsapp-invoice": "node scripts/test-fee-invoice-whatsapp.mjs",
     "test:school-welcome": "node scripts/test-school-welcome.js",
     "diagnose:whysms": "node scripts/diagnose-whysms.mjs",
