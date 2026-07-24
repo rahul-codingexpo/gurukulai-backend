@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "backfill:fee-invoice-discount": "node scripts/backfill-feeinvoice-discount.mjs",
     "migrate:spaces-urls": "node scripts/migrate-spaces-urls-to-local.mjs",
+    "fix:student-dates-from-sheet": "node scripts/fix-student-dates-from-sheet.mjs",
     "test:whatsapp-invoice": "node scripts/test-fee-invoice-whatsapp.mjs",
     "test:school-welcome": "node scripts/test-school-welcome.js",
     "diagnose:whysms": "node scripts/diagnose-whysms.mjs",

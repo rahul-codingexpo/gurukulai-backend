@@ -130,6 +130,7 @@ import XLSX from "xlsx";
 import fs from "fs";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
+import { parseSheetDate, calendarDateLocal } from "../../utils/parseSheetDate.util.js";
 
 const DEFAULT_STUDENT_PASSWORD =
   process.env.DEFAULT_STUDENT_PASSWORD ||
@@ -202,9 +203,8 @@ const toOptionalNumber = (value) => {
 
 const toOptionalDate = (value) => {
   if (value === undefined || value === null || value === "") return undefined;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  const parsed = parseSheetDate(value);
+  return parsed || undefined;
 };
 
 const normalizeStudentStatus = (value) => {
@@ -635,16 +635,14 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
       return undefined;
     };
 
+    // Always treat text dates as DD/MM/YYYY (India). Never use new Date("12-05-2018").
     const toDate = (v) => {
-      if (!v) return null;
-      if (v instanceof Date) return v;
-      // Excel might give serial date number
+      if (v === undefined || v === null || v === "") return null;
       if (typeof v === "number") {
         const parsed = XLSX.SSF.parse_date_code(v);
-        if (parsed) return new Date(parsed.y, parsed.m - 1, parsed.d);
+        if (parsed) return calendarDateLocal(parsed.d, parsed.m, parsed.y);
       }
-      const d = new Date(v);
-      return Number.isNaN(d.getTime()) ? null : d;
+      return parseSheetDate(v);
     };
 
     const toStr = (v) => (v === undefined || v === null ? "" : String(v).trim());
@@ -709,20 +707,54 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
       try {
         const name = pick(row, ["name", "studentName", "Student Name", "Name"]);
         const gender = pick(row, ["gender", "Gender"]);
-        const dobRaw = pick(row, ["dob", "DOB", "dateOfBirth", "Date of Birth"]);
-        const admissionNumber = pick(row, ["admissionNumber", "Admission Number", "AdmissionNo", "Admission No"]);
-        const rollNumber = pick(row, ["rollNumber", "Roll Number", "Roll No", "Roll No."]);
-        const className = pick(row, ["className", "Class Name", "class", "grade", "Grade"]);
+        const dobRaw = pick(row, [
+          "dob",
+          "DOB",
+          "dateOfBirth",
+          "Date of Birth",
+          "Date Of Birth",
+        ]);
+        const admissionNumber = pick(row, [
+          "admissionNumber",
+          "Admission Number",
+          "AdmissionNo",
+          "Admission No",
+          "Admission No.",
+        ]);
+        const rollNumber = pick(row, [
+          "rollNumber",
+          "Roll Number",
+          "Roll No",
+          "Roll No.",
+          "RollNo",
+        ]);
+        const className = pick(row, ["className", "Class Name", "class", "grade", "Grade", "Class"]);
         const section = pick(row, ["section", "Section", "sec", "Section Name"]);
-        const admissionDateRaw = pick(row, ["admissionDate", "Admission Date", "admission date", "Date"]);
+        const admissionDateRaw = pick(row, [
+          "admissionDate",
+          "Admission Date",
+          "admission date",
+          "Date of Admission",
+          "Date of Addmission",
+          "Date Of Addmission",
+          "Date",
+        ]);
 
         const fatherName = pick(row, ["fatherName", "Father Name", "father.name", "Father"]);
-        const fatherPhone = pick(row, ["fatherPhone", "Father Phone"]);
+        const fatherPhone = pick(row, [
+          "fatherPhone",
+          "Father Phone",
+          "Father Mobile",
+        ]);
         const fatherOccupation = pick(row, ["fatherOccupation", "Father Occupation"]);
-        const fatherEmail = pick(row, ["fatherEmail", "Father Email"]);
+        const fatherEmail = pick(row, ["fatherEmail", "Father Email", "Email"]);
 
         const motherName = pick(row, ["motherName", "Mother Name", "mother.name", "Mother"]);
-        const motherPhone = pick(row, ["motherPhone", "Mother Phone"]);
+        const motherPhone = pick(row, [
+          "motherPhone",
+          "Mother Phone",
+          "Mother Mobile",
+        ]);
         const motherOccupation = pick(row, ["motherOccupation", "Mother Occupation"]);
 
         const route = pick(row, ["route", "Route"]);
@@ -1188,8 +1220,8 @@ export const updateStudent = async (req, res, next) => {
     }
 
     if (admissionDate !== undefined) {
-      const parsed = new Date(admissionDate);
-      if (Number.isNaN(parsed.getTime())) {
+      const parsed = parseSheetDate(admissionDate);
+      if (!parsed) {
         return res.status(400).json({
           success: false,
           message: "admissionDate must be a valid date",
