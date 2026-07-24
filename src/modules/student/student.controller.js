@@ -130,7 +130,7 @@ import XLSX from "xlsx";
 import fs from "fs";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
-import { parseSheetDate, calendarDateLocal } from "../../utils/parseSheetDate.util.js";
+import { parseSheetDate, normalizeSheetPhone, normalizeSheetText } from "../../utils/parseSheetDate.util.js";
 
 const DEFAULT_STUDENT_PASSWORD =
   process.env.DEFAULT_STUDENT_PASSWORD ||
@@ -606,15 +606,26 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
 
     // Passwords are optional: if not provided, defaults will be used.
 
+    // cellDates:false + raw:true keeps CSV date strings as text (DD/MM).
+    // Without raw:true, SheetJS converts "12/5/2018" into a US date serial (Dec 5).
     const workbook = req.file.buffer
-      ? XLSX.read(req.file.buffer, { type: "buffer", cellDates: true })
-      : XLSX.readFile(req.file.path, { cellDates: true });
+      ? XLSX.read(req.file.buffer, {
+          type: "buffer",
+          cellDates: false,
+          raw: true,
+          dateNF: "dd/mm/yyyy",
+        })
+      : XLSX.readFile(req.file.path, {
+          cellDates: false,
+          raw: true,
+          dateNF: "dd/mm/yyyy",
+        });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
     // Each row becomes an object with keys from the header row.
-    // `defval: ""` prevents undefined values.
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+    // `defval: ""` prevents undefined values. Keep raw values (serials stay numbers).
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
 
     const normalizeKey = (k) => String(k || "").trim().toLowerCase();
 
@@ -635,20 +646,24 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
       return undefined;
     };
 
-    // Always treat text dates as DD/MM/YYYY (India). Never use new Date("12-05-2018").
+    // Always treat text dates as DD/MM/YYYY (India). Excel serials via parse_date_code.
     const toDate = (v) => {
       if (v === undefined || v === null || v === "") return null;
-      if (typeof v === "number") {
-        const parsed = XLSX.SSF.parse_date_code(v);
-        if (parsed) return calendarDateLocal(parsed.d, parsed.m, parsed.y);
-      }
-      return parseSheetDate(v);
+      return parseSheetDate(v, XLSX.SSF);
     };
 
-    const toStr = (v) => (v === undefined || v === null ? "" : String(v).trim());
+    const toStr = (v) => (v === undefined || v === null ? "" : normalizeSheetText(v));
     const toMaybeStr = (v) => {
       const s = toStr(v);
       return s ? s : undefined;
+    };
+    const toPhone = (v) => {
+      const p = normalizeSheetPhone(v);
+      return p || "";
+    };
+    const toMaybePhone = (v) => {
+      const p = normalizeSheetPhone(v);
+      return p || undefined;
     };
 
     // If excel is huge, these caches reduce DB hits.
@@ -796,7 +811,17 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
         const aadharCardNo = pick(row, ["aadharCardNo", "Aadhar Card No"]);
         const busNo = pick(row, ["busNo", "Bus No"]);
 
-        if (!name || !admissionNumber || !className || !section || !admissionDateRaw || !fatherName || !fatherPhone || !motherName || !motherPhone) {
+        if (
+          !name ||
+          !admissionNumber ||
+          !className ||
+          !section ||
+          !admissionDateRaw ||
+          !fatherName ||
+          !toPhone(fatherPhone) ||
+          !motherName ||
+          !toPhone(motherPhone)
+        ) {
           errors.push({
             rowNo,
             reason: "Missing required fields (name, admissionNumber, className, section, admissionDate, fatherName/fatherPhone, motherName/motherPhone)",
@@ -826,7 +851,7 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           continue;
         }
 
-        const studentPhone = toMaybeStr(pick(row, ["studentPhone", "student phone", "Student Phone", "phone"]));
+        const studentPhone = toMaybePhone(pick(row, ["studentPhone", "student phone", "Student Phone", "phone"]));
 
         const currentAddr = toMaybeStr(
           pick(row, [
@@ -869,7 +894,7 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           parents: {
             father: {
               name: toStr(fatherName),
-              phone: toStr(fatherPhone),
+              phone: toPhone(fatherPhone),
               qualification: toMaybeStr(fatherQualification),
               occupation: toMaybeStr(fatherOccupation),
               email: toMaybeStr(fatherEmail),
@@ -877,7 +902,7 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
             },
             mother: {
               name: toStr(motherName),
-              phone: toStr(motherPhone),
+              phone: toPhone(motherPhone),
               qualification: toMaybeStr(motherQualification),
               occupation: toMaybeStr(motherOccupation),
               dob: motherDob || undefined,
@@ -942,7 +967,7 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
 
         // PARENT LOGIN (using father phone as per your createAdmission logic)
         if (wantParentLogin) {
-          const parentKey = toStr(fatherPhone);
+          const parentKey = toPhone(fatherPhone);
           let parentUserId = parentUserCache.get(parentKey);
 
           if (!parentUserId) {

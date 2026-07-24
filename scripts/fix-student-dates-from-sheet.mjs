@@ -90,7 +90,11 @@ async function main() {
   console.log(`Mongo: ${mongoUri}`);
   console.log(dryRun ? "Mode: DRY RUN (no writes)" : "Mode: WRITE");
 
-  const wb = XLSX.readFile(excelPath, { cellDates: false });
+  const wb = XLSX.readFile(excelPath, {
+    cellDates: false,
+    raw: true,
+    dateNF: "dd/mm/yyyy",
+  });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
   console.log(`Sheet rows: ${rows.length}`);
