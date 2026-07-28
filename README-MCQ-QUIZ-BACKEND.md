@@ -1,6 +1,8 @@
 # MCQ Quiz Backend Implementation Guide
 
-> **For Backend Developer** — This document covers everything needed to build the backend for the SuperAdmin MCQ Quiz Upload feature. The frontend is already complete; you just need to wire up the APIs.
+> **Global question bank (updated):** Questions are **not** school-scoped. SuperAdmin uploads once; all schools receive questions filtered by **normalized class key** (`1st` / `Grade 1` / `Class 1` → `classKey: "1"`). Mobile APIs filter by student `className` → `classKey` only (no `schoolId`).
+
+> Migrate existing rows: `npm run migrate:quiz-questions-global` (optional `--dry-run`).
 
 ---
 
@@ -10,10 +12,13 @@ The SuperAdmin can upload MCQ questions in two ways:
 1. **CSV / JSON / XLSX bulk upload** — upload many questions at once via a file
 2. **Single question entry** — manually fill and save one question at a time
 
-Frontend page is already built at:
+Class + subject + quiz title are chosen on the **upload form** (not per CSV row). Uploads apply to **all schools**.
+
+Frontend page:
 ```
 src/pages/SchoolAcademic/MCQQuizzes/MCQQuizzesPage.jsx
 ```
+(Browse by class + bulk/single upload; no school selection.)
 
 ---
 
@@ -26,6 +31,8 @@ src/modules/quiz/
 ├── quizQuestion.model.js
 ├── quizQuestion.controller.js
 └── quizQuestion.routes.js
+
+src/utils/normalizeClassKey.util.js
 ```
 
 ---
@@ -41,12 +48,17 @@ const quizQuestionSchema = new Schema({
   schoolId: {
     type: ObjectId,
     ref: "School",
-    required: true,
+    required: false, // legacy only; ignored for new global uploads
   },
   class: {
     type: String,
     required: true,
-    // e.g. "Class 1", "Class 2", ..., "Class 12"
+    // display label e.g. "Grade 1", "1st", "Class 1"
+  },
+  classKey: {
+    type: String,
+    required: true,
+    // canonical e.g. "1", "pre-nursery" — used for matching
   },
   subject: {
     type: String,
@@ -56,7 +68,7 @@ const quizQuestionSchema = new Schema({
   quizTitle: {
     type: String,
     required: true,
-    // e.g. "Class 8 Algebra Practice - Set 1"
+    // e.g. "Grade 8 Algebra Practice - Set 1"
   },
   questionText: {
     type: String,
@@ -101,8 +113,8 @@ const quizQuestionSchema = new Schema({
 
 **Recommended Indexes:**
 ```js
-quizQuestionSchema.index({ schoolId: 1, class: 1, subject: 1, quizTitle: 1 });
-quizQuestionSchema.index({ schoolId: 1, isActive: 1 });
+quizQuestionSchema.index({ classKey: 1, subject: 1, quizTitle: 1 });
+quizQuestionSchema.index({ classKey: 1, isActive: 1 });
 ```
 
 ---
@@ -129,10 +141,9 @@ Content-Type: application/json
 Request Body:
 ```json
 {
-  "schoolId": "64abc...",
-  "class": "Class 8",
+  "class": "Grade 8",
   "subject": "Mathematics",
-  "quizTitle": "Class 8 Algebra Practice - Set 1",
+  "quizTitle": "Grade 8 Algebra Practice - Set 1",
   "questionText": "What is 2x + 3x?",
   "optionA": "3x",
   "optionB": "5x",
@@ -144,7 +155,7 @@ Request Body:
 }
 ```
 
-> **Note:** Frontend sends options as flat fields `optionA`, `optionB`, `optionC`, `optionD`. The backend should map them to the `options: { A, B, C, D }` schema structure internally.
+> **Note:** No `schoolId`. Backend stores `classKey` from `class` (e.g. `"8"`). Frontend may send `quizClass` instead of `class`.
 
 Success Response `201`:
 ```json
@@ -173,10 +184,11 @@ Form Fields:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `file` | File | ✅ Yes | `.csv`, `.json`, or `.xlsx` file |
-| `class` | String | ✅ Yes | e.g. `"Class 8"` |
+| `class` / `quizClass` | String | ✅ Yes | e.g. `"Grade 8"` (normalized to classKey) |
 | `subject` | String | ✅ Yes | e.g. `"Mathematics"` |
-| `quizTitle` | String | ✅ Yes | e.g. `"Class 8 Algebra - Set 1"` |
-| `schoolId` | String | Optional | If not provided, derive from authenticated user |
+| `quizTitle` | String | ✅ Yes | e.g. `"Grade 8 Algebra - Set 1"` |
+
+> Global bank — do **not** send `schoolId`.
 
 Success Response `200`:
 ```json
@@ -204,12 +216,13 @@ Success Response `200`:
 Query Params:
 | Param | Type | Description |
 |-------|------|-------------|
-| `schoolId` | String | Required |
-| `class` | String | Filter by class |
+| `class` / `classKey` | String | Filter by class (normalized; preferred for SuperAdmin browse) |
 | `subject` | String | Filter by subject |
 | `quizTitle` | String | Filter by quiz title |
 | `page` | Number | Default: 1 |
 | `limit` | Number | Default: 20 |
+
+> No `schoolId` — global bank.
 
 Success Response `200`:
 ```json

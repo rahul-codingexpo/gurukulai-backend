@@ -19,10 +19,13 @@ import {
   deleteInvoice,
   restoreInvoice,
   sendInvoicesWhatsApp,
+  prepareManualWhatsApp,
+  downloadInvoicePdf,
 } from "./feeInvoice.controller.js";
 import {
   listFeeAuditLogs,
   getFeeAuditTimeline,
+  permanentlyDeleteFeeSources,
 } from "./feeAudit/feeAudit.controller.js";
 import {
   recordPayment,
@@ -106,6 +109,20 @@ router.post(
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
   sendInvoicesWhatsApp
+);
+router.post(
+  "/fee-invoices/manual-whatsapp",
+  protect,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  prepareManualWhatsApp
+);
+router.get(
+  "/fee-invoices/:id/pdf",
+  protect,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  downloadInvoicePdf
 );
 router.get(
   "/fee-invoices/:id",
@@ -207,6 +224,13 @@ router.get(
   authorize("Admin", "Principal", "SuperAdmin"),
   injectSchool,
   listFeeAuditLogs,
+);
+router.post(
+  "/accounting/fee-audit/permanent-delete",
+  protect,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  permanentlyDeleteFeeSources,
 );
 router.get(
   "/accounting/fee-audit/:sourceType/:sourceId",

@@ -2,7 +2,10 @@ import FeeInvoice from "./feeInvoice.model.js";
 import FeeType from "./feeType.model.js";
 import Payment from "./payment.model.js";
 import Student from "../student/student.model.js";
+import School from "../school/school.model.js";
 import { notifyFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
+import { generateAndUploadInvoicePdf, buildInvoicePdfBuffer } from "../../services/invoicePdf.service.js";
+import { normalizeWhatsAppPhone } from "../../utils/phone.util.js";
 import { writeFeeAudit, diffTrackedFields } from "./feeAudit/feeAudit.service.js";
 
 const TRACKED_INVOICE_FIELDS = [
@@ -400,7 +403,7 @@ export const getInvoices = async (req, res, next) => {
   }
 };
 
-/** Send fee invoice WhatsApp for one or more invoices (manual — not on create). */
+/** Send fee invoice WhatsApp via WhySMS template API (automatic). */
 export const sendInvoicesWhatsApp = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
@@ -446,6 +449,327 @@ export const sendInvoicesWhatsApp = async (req, res, next) => {
           ? `WhatsApp sent for ${sent} invoice(s)${skipped ? `, ${skipped} skipped` : ""}`
           : "No WhatsApp messages were sent",
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const formatInrPlain = (n) =>
+  `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+
+const formatDueDateLong = (d) => {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const pickPhoneFromRaw = (raw) => normalizeWhatsAppPhone(raw);
+
+/** Parents: father first, then mother. */
+const pickParentPhone = (student) => {
+  const father = pickPhoneFromRaw(student?.parents?.father?.phone);
+  if (father) return { phone: father, used: "father" };
+  const mother = pickPhoneFromRaw(student?.parents?.mother?.phone);
+  if (mother) return { phone: mother, used: "mother" };
+  return { phone: null, used: null };
+};
+
+/** recipient: "student" | "parents" */
+const resolveWhatsAppRecipient = (student, recipient) => {
+  const target = String(recipient || "").toLowerCase() === "student" ? "student" : "parents";
+  if (target === "student") {
+    const phone = pickPhoneFromRaw(student?.phone);
+    return {
+      recipient: "student",
+      phone,
+      used: phone ? "student" : null,
+      error: phone ? null : "No valid WhatsApp phone on student",
+    };
+  }
+  const parent = pickParentPhone(student);
+  return {
+    recipient: "parents",
+    phone: parent.phone,
+    used: parent.used,
+    error: parent.phone
+      ? null
+      : "No valid WhatsApp phone on parents (father or mother)",
+  };
+};
+
+const ensureInvoicePdf = async (invoice, student, feeType, school, invoices) => {
+  const pdfUrl = await generateAndUploadInvoicePdf({
+    invoice,
+    invoices,
+    student,
+    feeType,
+    school,
+  });
+  const ids = (Array.isArray(invoices) && invoices.length ? invoices : [invoice])
+    .map((inv) => inv?._id)
+    .filter(Boolean);
+  if (ids.length) {
+    await FeeInvoice.updateMany({ _id: { $in: ids } }, { $set: { pdfUrl } });
+  }
+  return pdfUrl;
+};
+
+const getPublicBaseUrl = (req) => {
+  const fromEnv = String(process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
+  if (fromEnv) return fromEnv;
+  const proto = String(req.get("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim();
+  const host = String(req.get("x-forwarded-host") || req.get("host") || "")
+    .split(",")[0]
+    .trim();
+  if (!host) return "";
+  return `${proto}://${host}`;
+};
+
+const toAbsolutePdfUrl = (req, pdfUrl) => {
+  if (!pdfUrl) return "";
+  const raw = String(pdfUrl).trim();
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const pathPart = raw.startsWith("/") ? raw : `/${raw}`;
+  const base = getPublicBaseUrl(req);
+  return base ? `${base}${pathPart}` : pathPart;
+};
+
+/**
+ * Prepare a manual WhatsApp share: pre-filled invoice text + PDF download ids.
+ * Opens in WhatsApp app/web for the user to send.
+ */
+export const prepareManualWhatsApp = async (req, res, next) => {
+  try {
+    if (!requireSchool(req, res)) return;
+    const { invoiceIds, recipient } = req.body || {};
+    if (!Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "invoiceIds array is required",
+      });
+    }
+
+    const uniqueIds = [...new Set(invoiceIds.map((id) => String(id)))];
+    const invoices = await FeeInvoice.find({
+      _id: { $in: uniqueIds },
+      schoolId: req.schoolId,
+      isDeleted: { $ne: true },
+      status: { $ne: "Cancelled" },
+    })
+      .populate("studentId", "name admissionNumber className section rollNumber phone parents")
+      .populate("feeTypeId", "name code")
+      .lean();
+
+    if (invoices.length !== uniqueIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more invoices were not found or cannot be shared",
+      });
+    }
+
+    const student = invoices[0].studentId;
+    if (!student) {
+      return res.status(400).json({ success: false, message: "Student not found on invoice" });
+    }
+
+    const resolved = resolveWhatsAppRecipient(student, recipient);
+    if (!resolved.phone) {
+      return res.status(400).json({
+        success: false,
+        message: resolved.error || "No valid WhatsApp phone found",
+      });
+    }
+    const phone = resolved.phone;
+
+    const school = await School.findById(req.schoolId)
+      .select("name logo address city state pincode phone email affiliation schoolCode")
+      .lean();
+    const schoolName = school?.name || "School";
+
+    const pdfUrl = await ensureInvoicePdf(
+      invoices[0],
+      student,
+      invoices[0].feeTypeId,
+      school,
+      invoices,
+    );
+    const pdfs = [
+      {
+        invoiceId: String(invoices[0]._id),
+        invoiceNumber: invoices[0].invoiceNumber,
+        pdfUrl,
+        pdfAbsoluteUrl: toAbsolutePdfUrl(req, pdfUrl),
+      },
+    ];
+
+    const totalBase = invoices.reduce(
+      (s, inv) => s + Number(inv.baseAmount != null ? inv.baseAmount : inv.amount || 0),
+      0,
+    );
+    const totalAmount = invoices.reduce((s, inv) => s + Number(inv.amount || 0), 0);
+    const totalPaid = invoices.reduce((s, inv) => s + Number(inv.paid || 0), 0);
+    const totalBalance = Math.round((totalAmount - totalPaid) * 100) / 100;
+    const feeTypes = invoices
+      .map((inv) => (typeof inv.feeTypeId === "object" ? inv.feeTypeId?.name : ""))
+      .filter(Boolean)
+      .join(", ");
+    const invoiceNumbers = invoices.map((inv) => inv.invoiceNumber).join(", ");
+    const period = String(invoices[0].period || "").trim() || "—";
+    const classSection = [student.className, student.section].filter(Boolean).join(" - ") || "—";
+    const discountLabels = [
+      ...new Set(
+        invoices
+          .map((inv) => {
+            const pct = Number(inv.discountPercent) || 0;
+            return pct > 0 ? `${pct}%` : null;
+          })
+          .filter(Boolean),
+      ),
+    ];
+    const status =
+      invoices.every((i) => i.status === "Paid")
+        ? "Paid"
+        : invoices.some((i) => i.status === "Partial")
+          ? "Partial"
+          : invoices.some((i) => i.status === "Overdue")
+            ? "Overdue"
+            : invoices.some((i) => i.status === "Pending")
+              ? "Due"
+              : invoices[0].status || "Due";
+
+    const pdfLines = pdfs
+      .map((p) => {
+        const link = p.pdfAbsoluteUrl || p.pdfUrl;
+        return pdfs.length === 1
+          ? link
+          : `${p.invoiceNumber}: ${link}`;
+      })
+      .filter(Boolean);
+
+    const greeting =
+      resolved.recipient === "student"
+        ? `Dear ${student.name || "Student"},`
+        : "Dear Parent/Guardian,";
+
+    const message = [
+      `*Fee Invoice — ${schoolName}*`,
+      "",
+      greeting,
+      "",
+      resolved.recipient === "student"
+        ? "Please find your fee invoice details below."
+        : `Please find the fee invoice for *${student.name || "Student"}*.`,
+      "",
+      `*Invoice ID:* ${invoiceNumbers}`,
+      `*Admission No:* ${student.admissionNumber || "—"}`,
+      `*Class:* ${classSection}`,
+      `*Fee Type:* ${feeTypes || "—"}`,
+      `*Period:* ${period}`,
+      `*Actual Amount:* ${formatInrPlain(totalBase)}`,
+      `*Discount:* ${discountLabels.length ? discountLabels.join(", ") : "—"}`,
+      `*Payable Amount:* ${formatInrPlain(totalAmount)}`,
+      `*Paid:* ${formatInrPlain(totalPaid)}`,
+      `*Balance:* ${formatInrPlain(totalBalance)}`,
+      `*Status:* ${status}`,
+      `*Due Date:* ${formatDueDateLong(invoices[0].dueDate)}`,
+      "",
+      "*Invoice PDF:*",
+      ...(pdfLines.length ? pdfLines : ["PDF link unavailable"]),
+      "",
+      "Thank you.",
+    ].join("\n");
+
+    const waUrl = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+
+    res.json({
+      success: true,
+      data: {
+        phone,
+        message,
+        studentName: student.name,
+        recipient: resolved.recipient,
+        recipientUsed: resolved.used,
+        pdfs,
+        waUrl,
+      },
+      message: "WhatsApp share prepared",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Download invoice PDF (generates and caches if missing). */
+export const downloadInvoicePdf = async (req, res, next) => {
+  try {
+    if (!requireSchool(req, res)) return;
+    const invoice = await FeeInvoice.findOne({
+      _id: req.params.id,
+      schoolId: req.schoolId,
+      isDeleted: { $ne: true },
+    })
+      .populate("studentId", "name admissionNumber className section rollNumber phone parents")
+      .populate("feeTypeId", "name code")
+      .lean();
+
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: "Invoice not found" });
+    }
+
+    const school = await School.findById(req.schoolId)
+      .select("name logo address city state pincode phone email affiliation schoolCode")
+      .lean();
+
+    // Always rebuild so PDF matches the current fee-receipt print layout.
+    const siblingInvoices = await FeeInvoice.find({
+      schoolId: req.schoolId,
+      studentId: invoice.studentId?._id || invoice.studentId,
+      period: invoice.period || "",
+      isDeleted: { $ne: true },
+      status: { $ne: "Cancelled" },
+    })
+      .populate("feeTypeId", "name code")
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const lines =
+      siblingInvoices.length > 0
+        ? siblingInvoices
+        : [{ ...invoice, feeTypeId: invoice.feeTypeId }];
+
+    const buffer = await buildInvoicePdfBuffer({
+      invoice,
+      invoices: lines,
+      student: invoice.studentId,
+      feeType: invoice.feeTypeId,
+      school,
+    });
+
+    try {
+      const pdfUrl = await generateAndUploadInvoicePdf({
+        invoice,
+        invoices: lines,
+        student: invoice.studentId,
+        feeType: invoice.feeTypeId,
+        school,
+      });
+      await FeeInvoice.updateMany(
+        { _id: { $in: lines.map((r) => r._id) } },
+        { $set: { pdfUrl } },
+      );
+    } catch {
+      // Still return the buffer even if cache upload fails
+    }
+
+    const safeName = String(invoice.invoiceNumber || "invoice").replace(/[^\w.-]+/g, "_");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeName}.pdf"`);
+    res.send(buffer);
   } catch (error) {
     next(error);
   }

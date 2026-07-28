@@ -1140,6 +1140,8 @@ Returns students filtered by exam scope:
 
 Mobile quiz APIs are read-only and per-play only – they **do not** store quiz attempts in DB (score is computed on the fly from questions).
 
+**Global bank:** Quizzes are shared across all schools. Endpoints filter by the linked student’s **normalized class** (`classKey` from `className`: `1st` / `Grade 1` / `Class 1` → `"1"`). There is **no** `schoolId` filter on quiz questions.
+
 ### 9.1 Subject list screen (first quiz screen)
 Use this for subject cards like Biology / Mathematics.
 
@@ -1215,7 +1217,7 @@ This old endpoint is still available and groups by quizTitle + subject.
 **GET** `/api/mobile/quiz/quizzes`  
 **Auth:** Student / Parent
 
-Uses the linked student’s `schoolId` and `className` to discover available quizzes.
+Uses the linked student’s `className` (normalized to `classKey`) to discover available quizzes.
 
 **Optional query params:**
 - `subject` — filter by quiz subject (e.g. `"Mathematics"`)

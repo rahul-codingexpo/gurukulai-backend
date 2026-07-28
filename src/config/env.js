@@ -27,5 +27,5 @@ export const ENV = {
   WHYSMS_WAPP_API_BASE: process.env.WHYSMS_WAPP_API_BASE,
   NODE_ENV: process.env.NODE_ENV,
   RESEND_MAIL_API_KEY: process.env.RESEND_MAIL_API_KEY,
-  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL || "Gurukul AI <onboarding@resend.dev>",
+  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL || "Medhyx Technology <onboarding@resend.dev>",
 };

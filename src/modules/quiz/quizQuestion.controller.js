@@ -1,5 +1,6 @@
 import XLSX from "xlsx";
 import QuizQuestion from "./quizQuestion.model.js";
+import { normalizeClassKey } from "../../utils/normalizeClassKey.util.js";
 
 const ok = (res, payload = {}) => res.json({ success: true, ...payload });
 
@@ -23,11 +24,11 @@ const resolveStudentContextForMobileQuiz = async (req) => {
   if (roleName === "Student") {
     studentDoc = await Student.findOne({
       "studentLogin.userId": req.user._id,
-    }).select("schoolId className");
+    }).select("className");
   } else {
     studentDoc = await Student.findOne({
       "parentLogin.userId": req.user._id,
-    }).select("schoolId className");
+    }).select("className");
   }
 
   if (!studentDoc) {
@@ -36,12 +37,21 @@ const resolveStudentContextForMobileQuiz = async (req) => {
     throw err;
   }
 
-  return studentDoc;
+  const classKey = normalizeClassKey(studentDoc.className);
+  if (!classKey) {
+    const err = new Error("Student class is missing or unrecognized");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return {
+    className: studentDoc.className,
+    classKey,
+  };
 };
 
 const mapBodyToQuestion = (body, userIdFallback) => {
   const {
-    schoolId,
     class: className,
     quizClass,
     subject,
@@ -57,9 +67,12 @@ const mapBodyToQuestion = (body, userIdFallback) => {
     difficulty = "medium",
   } = body;
 
+  const displayClass = className || quizClass;
+  const classKey = normalizeClassKey(displayClass);
+
   const mapped = {
-    schoolId,
-    class: className || quizClass,
+    class: displayClass,
+    classKey,
     subject,
     quizTitle,
     questionText,
@@ -148,10 +161,10 @@ const parseUploadFile = (file) => {
     return parsed;
   }
 
-  const workbook = XLSX.read(file.buffer, { type: "buffer" });
+  const workbook = XLSX.read(file.buffer, { type: "buffer", cellDates: false, raw: true });
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
   return rows;
 };
 
@@ -159,11 +172,11 @@ export const createQuestion = async (req, res, next) => {
   try {
     const body = mapBodyToQuestion(req.body, req.user?._id);
 
-    if (!body.schoolId) {
-      return fail(res, 400, "schoolId is required");
-    }
     if (!body.class) {
       return fail(res, 400, "class is required");
+    }
+    if (!body.classKey) {
+      return fail(res, 400, "class could not be normalized (use Grade 1, 1st, Class 1, etc.)");
     }
     if (!body.subject) {
       return fail(res, 400, "subject is required");
@@ -188,12 +201,15 @@ export const createQuestion = async (req, res, next) => {
 
 export const bulkUpload = async (req, res, next) => {
   try {
-    const { class: className, quizClass, subject, quizTitle, schoolId } =
-      req.body;
+    const { class: className, quizClass, subject, quizTitle } = req.body;
     const effectiveClass = className || quizClass;
+    const classKey = normalizeClassKey(effectiveClass);
 
     if (!effectiveClass || !subject || !quizTitle) {
       return fail(res, 400, "class, subject and quizTitle are required");
+    }
+    if (!classKey) {
+      return fail(res, 400, "class could not be normalized (use Grade 1, 1st, Class 1, etc.)");
     }
 
     if (!req.file) {
@@ -228,7 +244,6 @@ export const bulkUpload = async (req, res, next) => {
 
       const mapped = mapBodyToQuestion(
         {
-          schoolId,
           class: effectiveClass,
           subject,
           quizTitle,
@@ -251,6 +266,7 @@ export const bulkUpload = async (req, res, next) => {
         createdCount: created.length,
         errorCount: errors.length,
         errors,
+        classKey,
       },
     });
   } catch (err) {
@@ -261,25 +277,26 @@ export const bulkUpload = async (req, res, next) => {
 export const listQuestions = async (req, res, next) => {
   try {
     const {
-      schoolId,
       class: className,
+      classKey: classKeyQuery,
       subject,
       quizTitle,
       page = 1,
       limit = 20,
     } = req.query;
 
-    if (!schoolId) {
-      return fail(res, 400, "schoolId is required");
-    }
+    const query = { isActive: true };
 
-    const query = { schoolId, isActive: true };
-    if (className) query.class = className;
+    const classKey =
+      (classKeyQuery && String(classKeyQuery).trim()) ||
+      (className ? normalizeClassKey(className) : null);
+
+    if (classKey) query.classKey = classKey;
     if (subject) query.subject = subject;
     if (quizTitle) query.quizTitle = quizTitle;
 
     const pageNum = Math.max(1, Number(page) || 1);
-    const lim = Math.max(1, Math.min(100, Number(limit) || 20));
+    const lim = Math.max(1, Math.min(100, Number(limit) || 25));
 
     const [items, total] = await Promise.all([
       QuizQuestion.find(query)
@@ -295,6 +312,7 @@ export const listQuestions = async (req, res, next) => {
         total,
         page: pageNum,
         limit: lim,
+        classKey: classKey || null,
       },
     });
   } catch (err) {
@@ -307,12 +325,7 @@ export const updateQuestion = async (req, res, next) => {
     const { id } = req.params;
     const body = { ...req.body };
 
-    if (
-      body.optionA ||
-      body.optionB ||
-      body.optionC ||
-      body.optionD
-    ) {
+    if (body.optionA || body.optionB || body.optionC || body.optionD) {
       body.options = {
         ...(body.options || {}),
         ...(body.optionA ? { A: body.optionA } : {}),
@@ -325,6 +338,19 @@ export const updateQuestion = async (req, res, next) => {
       delete body.optionC;
       delete body.optionD;
     }
+
+    if (body.class || body.quizClass) {
+      const displayClass = body.class || body.quizClass;
+      body.class = displayClass;
+      body.classKey = normalizeClassKey(displayClass);
+      delete body.quizClass;
+      if (!body.classKey) {
+        return fail(res, 400, "class could not be normalized");
+      }
+    }
+
+    // Do not allow setting schoolId on updates for global bank
+    delete body.schoolId;
 
     const updated = await QuizQuestion.findByIdAndUpdate(id, body, {
       new: true,
@@ -364,6 +390,52 @@ export const deleteQuestion = async (req, res, next) => {
   }
 };
 
+/**
+ * Soft-delete many questions. Requires SuperAdmin password confirmation.
+ * Body: { ids: string[], password: string }
+ */
+export const bulkDeleteQuestions = async (req, res, next) => {
+  try {
+    const { ids, password } = req.body || {};
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return fail(res, 400, "ids array is required");
+    }
+    if (!password || !String(password).trim()) {
+      return fail(res, 400, "password is required to confirm delete");
+    }
+
+    const User = (await import("../user/user.model.js")).default;
+    const { comparePassword } = await import("../../utils/hash.js");
+
+    const userWithPass = await User.findById(req.user._id).select("+password");
+    if (!userWithPass?.password) {
+      return fail(res, 401, "Unable to verify password");
+    }
+
+    const match = await comparePassword(String(password), userWithPass.password);
+    if (!match) {
+      return fail(res, 401, "Incorrect password");
+    }
+
+    const uniqueIds = [...new Set(ids.map((id) => String(id)).filter(Boolean))];
+    const result = await QuizQuestion.updateMany(
+      { _id: { $in: uniqueIds }, isActive: true },
+      { $set: { isActive: false } },
+    );
+
+    return ok(res, {
+      message: "Selected questions deleted successfully",
+      data: {
+        requested: uniqueIds.length,
+        deletedCount: result.modifiedCount ?? result.nModified ?? 0,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const listMobileQuizzes = async (req, res, next) => {
   try {
     const studentDoc = await resolveStudentContextForMobileQuiz(req);
@@ -371,8 +443,7 @@ export const listMobileQuizzes = async (req, res, next) => {
     const subjectFilter = req.query.subject;
 
     const match = {
-      schoolId: studentDoc.schoolId,
-      class: studentDoc.className,
+      classKey: studentDoc.classKey,
       isActive: true,
     };
     if (subjectFilter) {
@@ -390,6 +461,7 @@ export const listMobileQuizzes = async (req, res, next) => {
           quizTitle: { $first: "$quizTitle" },
           subject: { $first: "$subject" },
           class: { $first: "$class" },
+          classKey: { $first: "$classKey" },
           questionCount: { $sum: 1 },
           totalMarks: { $sum: "$marks" },
         },
@@ -412,8 +484,7 @@ export const listMobileQuizSubjects = async (req, res, next) => {
     const subjects = await QuizQuestion.aggregate([
       {
         $match: {
-          schoolId: studentDoc.schoolId,
-          class: studentDoc.className,
+          classKey: studentDoc.classKey,
           isActive: true,
         },
       },
@@ -457,8 +528,7 @@ export const listMobileQuizTopicsBySubject = async (req, res, next) => {
     const topics = await QuizQuestion.aggregate([
       {
         $match: {
-          schoolId: studentDoc.schoolId,
-          class: studentDoc.className,
+          classKey: studentDoc.classKey,
           subject: String(subject),
           isActive: true,
         },
@@ -469,9 +539,9 @@ export const listMobileQuizTopicsBySubject = async (req, res, next) => {
           quizTitle: { $first: "$quizTitle" },
           subject: { $first: "$subject" },
           class: { $first: "$class" },
+          classKey: { $first: "$classKey" },
           questionCount: { $sum: 1 },
           totalMarks: { $sum: "$marks" },
-          // Optional description: first non-empty explanation from this topic, if any
           descriptions: { $addToSet: "$explanation" },
           difficultySet: { $addToSet: "$difficulty" },
         },
@@ -482,6 +552,7 @@ export const listMobileQuizTopicsBySubject = async (req, res, next) => {
           quizTitle: 1,
           subject: 1,
           class: 1,
+          classKey: 1,
           questionCount: 1,
           totalMarks: 1,
           description: {
@@ -512,6 +583,7 @@ export const listMobileQuizTopicsBySubject = async (req, res, next) => {
       data: {
         subject: String(subject),
         class: studentDoc.className,
+        classKey: studentDoc.classKey,
         topics,
       },
     });
@@ -523,8 +595,6 @@ export const listMobileQuizTopicsBySubject = async (req, res, next) => {
 
 export const getMobileQuizQuestions = async (req, res, next) => {
   try {
-    await resolveStudentContextForMobileQuiz(req);
-
     const { quizTitle, subject } = req.query;
 
     if (!quizTitle || !subject) {
@@ -538,8 +608,7 @@ export const getMobileQuizQuestions = async (req, res, next) => {
     const studentDoc = await resolveStudentContextForMobileQuiz(req);
 
     const questions = await QuizQuestion.find({
-      schoolId: studentDoc.schoolId,
-      class: studentDoc.className,
+      classKey: studentDoc.classKey,
       subject,
       quizTitle,
       isActive: true,
@@ -559,6 +628,7 @@ export const getMobileQuizQuestions = async (req, res, next) => {
         quizTitle,
         subject,
         class: studentDoc.className,
+        classKey: studentDoc.classKey,
         totalQuestions: sanitized.length,
         totalMarks: sanitized.reduce((sum, q) => sum + (q.marks || 1), 0),
         questions: sanitized,
@@ -585,8 +655,7 @@ export const submitMobileQuiz = async (req, res, next) => {
     const studentDoc = await resolveStudentContextForMobileQuiz(req);
 
     const questions = await QuizQuestion.find({
-      schoolId: studentDoc.schoolId,
-      class: studentDoc.className,
+      classKey: studentDoc.classKey,
       subject,
       quizTitle,
       isActive: true,
@@ -626,6 +695,7 @@ export const submitMobileQuiz = async (req, res, next) => {
         quizTitle,
         subject,
         class: studentDoc.className,
+        classKey: studentDoc.classKey,
         totalQuestions: questions.length,
         totalMarks,
         obtainedMarks,
@@ -641,4 +711,3 @@ export const submitMobileQuiz = async (req, res, next) => {
     next(err);
   }
 };
-

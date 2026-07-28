@@ -2,6 +2,7 @@ import express from "express";
 import { protect } from "../../middleware/auth.middleware.js";
 import { uploadQuizFile } from "../../middleware/upload.middleware.js";
 import {
+  bulkDeleteQuestions,
   bulkUpload,
   createQuestion,
   deleteQuestion,
@@ -38,6 +39,8 @@ router.post(
 );
 
 router.get("/", protect, listQuestions);
+
+router.post("/bulk-delete", protect, requireSuperAdmin, bulkDeleteQuestions);
 
 router.patch("/:id", protect, requireSuperAdmin, updateQuestion);
 

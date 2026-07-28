@@ -4,14 +4,22 @@ const { Schema } = mongoose;
 
 const quizQuestionSchema = new Schema(
   {
+    /** Legacy — optional; ignored for new global bank uploads */
     schoolId: {
       type: Schema.Types.ObjectId,
       ref: "School",
-      required: true,
+      required: false,
     },
+    /** Display label as uploaded (e.g. "Grade 1", "1st") */
     class: {
       type: String,
       required: true,
+    },
+    /** Canonical key for matching across schools (e.g. "1", "pre-nursery") */
+    classKey: {
+      type: String,
+      required: true,
+      index: true,
     },
     subject: {
       type: String,
@@ -64,13 +72,11 @@ const quizQuestionSchema = new Schema(
 );
 
 quizQuestionSchema.index({
-  schoolId: 1,
-  class: 1,
+  classKey: 1,
   subject: 1,
   quizTitle: 1,
 });
 
-quizQuestionSchema.index({ schoolId: 1, isActive: 1 });
+quizQuestionSchema.index({ classKey: 1, isActive: 1 });
 
 export default mongoose.model("QuizQuestion", quizQuestionSchema);
-

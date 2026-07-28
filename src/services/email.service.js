@@ -23,7 +23,7 @@ const getOtpTemplate = (otp) => `
           <!-- Header Banner -->
           <tr>
             <td style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); padding: 32px 24px; text-align: center;">
-              <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em;">Gurukul AI</h1>
+              <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em;">Medhyx Technology</h1>
               <p style="color: #93c5fd; margin: 6px 0 0 0; font-size: 14px; font-weight: 500;">Security Verification</p>
             </td>
           </tr>
@@ -32,7 +32,7 @@ const getOtpTemplate = (otp) => `
             <td style="padding: 40px 32px;">
               <h2 style="color: #0f172a; margin: 0 0 16px 0; font-size: 20px; font-weight: 600; line-height: 1.4;">Reset Your Password</h2>
               <p style="color: #475569; margin: 0 0 28px 0; font-size: 15px; line-height: 1.6;">
-                We received a request to reset your password for your Gurukul AI account. Use the verification code below to complete the reset process. This code is valid for <strong>10 minutes</strong>.
+                We received a request to reset your password for your Medhyx Technology account. Use the verification code below to complete the reset process. This code is valid for <strong>10 minutes</strong>.
               </p>
               
               <!-- OTP Box -->
@@ -62,7 +62,7 @@ const getOtpTemplate = (otp) => `
         <table width="100%" max-width="500" border="0" cellspacing="0" cellpadding="0" style="max-width: 500px; width: 100%; margin-top: 20px; text-align: center;">
           <tr>
             <td style="color: #94a3b8; font-size: 12px; line-height: 1.5; padding: 0 10px;">
-              &copy; 2026 Gurukul AI. All rights reserved.<br>
+              &copy; 2026 Medhyx Technology. All rights reserved.<br>
               This is an automated system email. Please do not reply directly to this message.
             </td>
           </tr>
@@ -89,7 +89,7 @@ export const sendOtpEmail = async (toEmail, otp) => {
   const emailBody = {
     from: ENV.RESEND_FROM_EMAIL,
     to: toEmail,
-    subject: `${otp} is your Gurukul AI password reset verification code`,
+    subject: `${otp} is your Medhyx Technology password reset verification code`,
     html: getOtpTemplate(otp),
   };
 

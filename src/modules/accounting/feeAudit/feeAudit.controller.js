@@ -2,6 +2,9 @@ import mongoose from "mongoose";
 import FeeAuditLog from "./feeAuditLog.model.js";
 import FeeInvoice from "../feeInvoice.model.js";
 import PastFeeRecord from "../pastFees/pastFeeRecord.model.js";
+import Payment from "../payment.model.js";
+import User from "../../user/user.model.js";
+import { comparePassword } from "../../../utils/hash.js";
 
 const ok = (res, payload) => res.json({ success: true, ...payload });
 const fail = (res, status, message) =>
@@ -186,6 +189,110 @@ export const getFeeAuditTimeline = async (req, res, next) => {
         live,
         currentlyDeleted: !!live?.isDeleted,
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /accounting/fee-audit/permanent-delete
+ * Body: { items: [{ sourceType, sourceId }], password }
+ * Hard-deletes FeeInvoice / PastFeeRecord and all related audit logs (and invoice payments).
+ */
+export const permanentlyDeleteFeeSources = async (req, res, next) => {
+  try {
+    const schoolId = req.schoolId;
+    if (!schoolId) {
+      return fail(
+        res,
+        400,
+        req.user?.roleId?.name === "SuperAdmin"
+          ? "Select a school to permanently delete fee data"
+          : "School context missing",
+      );
+    }
+
+    const { password } = req.body || {};
+    if (!password || !String(password).trim()) {
+      return fail(res, 400, "Password is required to confirm permanent delete");
+    }
+
+    const userWithPass = await User.findById(req.user._id).select("+password");
+    if (!userWithPass?.password) {
+      return fail(res, 401, "Unable to verify password");
+    }
+    const match = await comparePassword(String(password), userWithPass.password);
+    if (!match) {
+      return fail(res, 401, "Incorrect password");
+    }
+
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!rawItems.length) {
+      return fail(res, 400, "items array is required");
+    }
+
+    const unique = new Map();
+    for (const item of rawItems) {
+      const sourceType = String(item?.sourceType || "");
+      const sourceId = String(item?.sourceId || "");
+      if (!ALLOWED_SOURCE_TYPES.includes(sourceType)) continue;
+      if (!mongoose.Types.ObjectId.isValid(sourceId)) continue;
+      unique.set(`${sourceType}:${sourceId}`, { sourceType, sourceId });
+    }
+
+    if (!unique.size) {
+      return fail(res, 400, "No valid fee records selected");
+    }
+
+    let deletedInvoices = 0;
+    let deletedPastFees = 0;
+    let deletedAuditLogs = 0;
+    let deletedPayments = 0;
+
+    for (const { sourceType, sourceId } of unique.values()) {
+      if (sourceType === "FeeInvoice") {
+        // eslint-disable-next-line no-await-in-loop
+        const inv = await FeeInvoice.findOne({ _id: sourceId, schoolId }).select("_id");
+        if (inv) {
+          // eslint-disable-next-line no-await-in-loop
+          const payResult = await Payment.deleteMany({
+            invoiceId: sourceId,
+            schoolId,
+          });
+          deletedPayments += payResult.deletedCount || 0;
+          // eslint-disable-next-line no-await-in-loop
+          await FeeInvoice.deleteOne({ _id: sourceId, schoolId });
+          deletedInvoices += 1;
+        }
+      } else if (sourceType === "PastFeeRecord") {
+        // eslint-disable-next-line no-await-in-loop
+        const past = await PastFeeRecord.findOne({ _id: sourceId, schoolId }).select("_id");
+        if (past) {
+          // eslint-disable-next-line no-await-in-loop
+          await PastFeeRecord.deleteOne({ _id: sourceId, schoolId });
+          deletedPastFees += 1;
+        }
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      const auditResult = await FeeAuditLog.deleteMany({
+        schoolId,
+        sourceType,
+        sourceId,
+      });
+      deletedAuditLogs += auditResult.deletedCount || 0;
+    }
+
+    return ok(res, {
+      data: {
+        requested: unique.size,
+        deletedInvoices,
+        deletedPastFees,
+        deletedPayments,
+        deletedAuditLogs,
+      },
+      message: `Permanently deleted ${unique.size} fee record(s)`,
     });
   } catch (err) {
     next(err);

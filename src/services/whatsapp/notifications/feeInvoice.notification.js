@@ -86,22 +86,23 @@ export const notifyFeeInvoiceWhatsApp = async (invoiceId) => {
   const student = invoice.studentId;
   if (!student) return { skipped: true, reason: "Student not found" };
 
-  const school = await School.findById(invoice.schoolId).select("name").lean();
+  const school = await School.findById(invoice.schoolId)
+    .select("name logo address city state pincode phone email affiliation schoolCode")
+    .lean();
   const feeType = invoice.feeTypeId;
 
-  let pdfUrl = invoice.pdfUrl;
-  if (!pdfUrl) {
-    try {
-      pdfUrl = await generateAndUploadInvoicePdf({
-        invoice,
-        student,
-        feeType,
-        school,
-      });
-      await FeeInvoice.updateOne({ _id: invoice._id }, { $set: { pdfUrl } });
-    } catch (err) {
-      return { skipped: true, reason: "PDF generation failed", error: err.message };
-    }
+  // Always regenerate so PDF matches the print fee-receipt layout.
+  let pdfUrl;
+  try {
+    pdfUrl = await generateAndUploadInvoicePdf({
+      invoice,
+      student,
+      feeType,
+      school,
+    });
+    await FeeInvoice.updateOne({ _id: invoice._id }, { $set: { pdfUrl } });
+  } catch (err) {
+    return { skipped: true, reason: "PDF generation failed", error: err.message };
   }
 
   let family = collectStudentFamilyRecipients(student);
