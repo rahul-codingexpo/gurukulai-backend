@@ -128,6 +128,7 @@ import TransferCertificate from "../tc/tc.model.js";
 import Class from "../academic/class.model.js";
 import Section from "../academic/section.model.js";
 import Session from "../academic/session.model.js";
+import FeeType from "../accounting/feeType.model.js";
 import bcrypt from "bcryptjs";
 import XLSX from "xlsx";
 import fs from "fs";
@@ -220,13 +221,17 @@ const normalizeStudentStatus = (value) => {
     : undefined;
 };
 
+const FEE_PERIODS = ["Monthly", "Quarterly", "Half-Yearly", "Yearly", "One-Time"];
+
 /** Map sheet values like "6th" / "Class 6" → "Grade 6" for Class master list. */
 const canonicalizeClassName = (raw) => {
   const trimmed = String(raw || "").trim();
   if (!trimmed) return "";
-  const key = normalizeClassKey(trimmed);
-  if (!key) return trimmed;
-  return classKeyToLabel(key) || trimmed;
+  // Strip leading "Class " so "Class 6th" / "Class Grade 1" normalize cleanly
+  const withoutClassPrefix = trimmed.replace(/^class\s+/i, "").trim() || trimmed;
+  const key = normalizeClassKey(withoutClassPrefix);
+  if (!key) return withoutClassPrefix;
+  return classKeyToLabel(key) || withoutClassPrefix;
 };
 
 const canonicalizeSectionName = (raw) => String(raw || "").trim().toUpperCase();
@@ -239,9 +244,46 @@ const resolveSchoolSession = async (schoolId) => {
   return session;
 };
 
+const classNameMatchesKey = (name, classKey, className) => {
+  const n = String(name || "").trim();
+  if (!n) return false;
+  if (n.toLowerCase() === String(className || "").toLowerCase()) return true;
+  const key = normalizeClassKey(n.replace(/^class\s+/i, "").trim() || n);
+  return Boolean(key && classKey && key === classKey);
+};
+
+const buildFeeTypeCode = (name, codeRaw) => {
+  const fromSheet = String(codeRaw || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 10);
+  if (fromSheet) return fromSheet;
+  const fromName = String(name || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "")
+    .slice(0, 10);
+  return fromName || "FEETYPE";
+};
+
+const normalizeFeePeriod = (raw) => {
+  const value = String(raw || "").trim();
+  if (!value) return "Monthly";
+  const found = FEE_PERIODS.find((p) => p.toLowerCase() === value.toLowerCase());
+  if (found) return found;
+  const compact = value.toLowerCase().replace(/[\s_-]+/g, "");
+  if (compact === "month" || compact === "monthly") return "Monthly";
+  if (compact === "quarter" || compact === "quarterly") return "Quarterly";
+  if (compact === "halfyearly" || compact === "halfyear") return "Half-Yearly";
+  if (compact === "yearly" || compact === "annual" || compact === "annually") return "Yearly";
+  if (compact === "onetime" || compact === "once") return "One-Time";
+  return "Monthly";
+};
+
 /**
  * Ensure Class + Section exist for bulk admission. Creates them on the school's
- * active (or latest) session when missing. Returns canonical names for the student.
+ * active (or latest) session when missing. Returns canonical names + classId.
  */
 const ensureClassAndSectionForBulk = async ({
   schoolId,
@@ -263,28 +305,42 @@ const ensureClassAndSectionForBulk = async ({
 
   let classDoc = classCache.get(classCacheKey);
   if (!classDoc) {
+    // 1) Exact name in active session
     classDoc = await Class.findOne({ schoolId, sessionId, name: className });
+
+    // 2) Fuzzy match in active session (6th vs Grade 6)
     if (!classDoc) {
       const sessionClasses = await Class.find({ schoolId, sessionId }).lean();
-      const matched = sessionClasses.find(
-        (c) => normalizeClassKey(c.name) === classKey || String(c.name).trim().toLowerCase() === className.toLowerCase(),
-      );
-      if (matched) {
-        classDoc = await Class.findById(matched._id);
-      }
+      const matched = sessionClasses.find((c) => classNameMatchesKey(c.name, classKey, className));
+      if (matched) classDoc = await Class.findById(matched._id);
     }
+
+    // 3) Fuzzy match anywhere in school (reuse existing master row if present)
+    if (!classDoc) {
+      const schoolClasses = await Class.find({ schoolId }).lean();
+      const matched = schoolClasses.find((c) => classNameMatchesKey(c.name, classKey, className));
+      if (matched) classDoc = await Class.findById(matched._id);
+    }
+
+    // 4) Create on active/latest session
     if (!classDoc) {
       try {
         classDoc = await Class.create({ name: className, sessionId, schoolId });
         createdMeta.classes.add(className);
       } catch (err) {
         classDoc = await Class.findOne({ schoolId, sessionId, name: className });
+        if (!classDoc) {
+          const schoolClasses = await Class.find({ schoolId }).lean();
+          const matched = schoolClasses.find((c) => classNameMatchesKey(c.name, classKey, className));
+          if (matched) classDoc = await Class.findById(matched._id);
+        }
         if (!classDoc) throw err;
       }
     }
     classCache.set(classCacheKey, classDoc);
   }
 
+  const sectionSessionId = classDoc.sessionId || sessionId;
   const sectionCacheKey = `${String(classDoc._id)}:${sectionName}`;
   let sectionDoc = sectionCache.get(sectionCacheKey);
   if (!sectionDoc) {
@@ -307,7 +363,7 @@ const ensureClassAndSectionForBulk = async ({
         sectionDoc = await Section.create({
           name: sectionName,
           classId: classDoc._id,
-          sessionId,
+          sessionId: sectionSessionId,
           schoolId,
         });
         createdMeta.sections.add(`${classDoc.name} - ${sectionName}`);
@@ -324,9 +380,73 @@ const ensureClassAndSectionForBulk = async ({
   }
 
   return {
+    classId: classDoc._id,
     className: classDoc.name,
     section: sectionDoc.name,
   };
+};
+
+/**
+ * Find or create fee type from Excel, and link the student's class to it
+ * so Fee Types page shows the same fee type against that class.
+ */
+const ensureFeeTypeForBulk = async ({
+  schoolId,
+  classId,
+  feeTypeRaw,
+  feeCodeRaw,
+  feeAmountRaw,
+  feePeriodRaw,
+  feeTypeCache,
+  createdMeta,
+}) => {
+  const name = String(feeTypeRaw || "").trim();
+  if (!name || !classId) return null;
+
+  const code = buildFeeTypeCode(name, feeCodeRaw);
+  const cacheKey = `${String(schoolId)}:${code}`;
+
+  let feeType = feeTypeCache.get(cacheKey);
+  if (!feeType) {
+    feeType = await FeeType.findOne({
+      schoolId,
+      $or: [{ code }, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") }],
+    });
+
+    if (!feeType) {
+      const amountNum = Number(feeAmountRaw);
+      const amount = Number.isFinite(amountNum) && amountNum >= 0 ? amountNum : 0;
+      try {
+        feeType = await FeeType.create({
+          schoolId,
+          name,
+          code,
+          amount,
+          period: normalizeFeePeriod(feePeriodRaw),
+          classIds: [classId],
+          status: "Active",
+        });
+        createdMeta.feeTypes.add(`${name} (${code})`);
+      } catch (err) {
+        feeType = await FeeType.findOne({ schoolId, code });
+        if (!feeType) throw err;
+      }
+    }
+    feeTypeCache.set(cacheKey, feeType);
+  }
+
+  const alreadyLinked = (feeType.classIds || []).some((id) => String(id) === String(classId));
+  if (!alreadyLinked) {
+    feeType = await FeeType.findByIdAndUpdate(
+      feeType._id,
+      { $addToSet: { classIds: classId } },
+      { new: true },
+    );
+    feeTypeCache.set(cacheKey, feeType);
+    createdMeta.feeTypeLinks.add(`${feeType.name} → class`);
+  }
+
+  return feeType;
 };
 
 /* CREATE ADMISSION */
@@ -826,7 +946,13 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
     const parentUserCache = new Map();
     const classCache = new Map();
     const sectionCache = new Map();
-    const createdMeta = { classes: new Set(), sections: new Set() };
+    const feeTypeCache = new Map();
+    const createdMeta = {
+      classes: new Set(),
+      sections: new Set(),
+      feeTypes: new Set(),
+      feeTypeLinks: new Set(),
+    };
 
     const schoolSession = await resolveSchoolSession(schoolId);
     if (!schoolSession?._id) {
@@ -987,6 +1113,42 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           createdMeta,
         });
 
+        const feeTypeName = pick(row, [
+          "feeType",
+          "Fee Type",
+          "feeTypeName",
+          "Fee Type Name",
+          "fee name",
+          "Fee Name",
+        ]);
+        const feeTypeCode = pick(row, ["feeTypeCode", "Fee Type Code", "feeCode", "Fee Code"]);
+        const feeAmount = pick(row, [
+          "feeAmount",
+          "Fee Amount",
+          "feeTypeAmount",
+          "Fee Type Amount",
+        ]);
+        const feePeriod = pick(row, [
+          "feePeriod",
+          "Fee Period",
+          "feeTypePeriod",
+          "Fee Type Period",
+        ]);
+
+        let feeTypeDoc = null;
+        if (toMaybeStr(feeTypeName)) {
+          feeTypeDoc = await ensureFeeTypeForBulk({
+            schoolId,
+            classId: ensured.classId,
+            feeTypeRaw: feeTypeName,
+            feeCodeRaw: feeTypeCode,
+            feeAmountRaw: feeAmount,
+            feePeriodRaw: feePeriod,
+            feeTypeCache,
+            createdMeta,
+          });
+        }
+
         const studentPhone = toMaybePhone(pick(row, ["studentPhone", "student phone", "Student Phone", "phone"]));
 
         const currentAddr = toMaybeStr(
@@ -1052,6 +1214,15 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
             marks: toMaybeStr(marks),
             board: toMaybeStr(board),
           },
+          feeStructure: feeTypeDoc
+            ? [
+                {
+                  feeType: String(feeTypeDoc._id),
+                  period: feeTypeDoc.period,
+                  amount: feeTypeDoc.amount,
+                },
+              ]
+            : undefined,
           status: normalizeStudentStatus(status),
           route: toMaybeStr(route),
           group: toMaybeStr(group),
@@ -1159,6 +1330,8 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
         errorCount: errors.length,
         createdClasses: [...createdMeta.classes],
         createdSections: [...createdMeta.sections],
+        createdFeeTypes: [...createdMeta.feeTypes],
+        linkedFeeTypes: [...createdMeta.feeTypeLinks],
         created,
         skipped,
         errors: errors.length ? errors : undefined,
