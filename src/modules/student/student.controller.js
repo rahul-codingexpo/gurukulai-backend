@@ -125,12 +125,16 @@ import Wallet from "../wallet/wallet.model.js";
 import WalletPayment from "../wallet/walletPayment.model.js";
 import Promotion from "../promote/promotion.model.js";
 import TransferCertificate from "../tc/tc.model.js";
+import Class from "../academic/class.model.js";
+import Section from "../academic/section.model.js";
+import Session from "../academic/session.model.js";
 import bcrypt from "bcryptjs";
 import XLSX from "xlsx";
 import fs from "fs";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 import { parseSheetDate, normalizeSheetPhone, normalizeSheetText } from "../../utils/parseSheetDate.util.js";
+import { normalizeClassKey, classKeyToLabel } from "../../utils/normalizeClassKey.util.js";
 
 const DEFAULT_STUDENT_PASSWORD =
   process.env.DEFAULT_STUDENT_PASSWORD ||
@@ -214,6 +218,115 @@ const normalizeStudentStatus = (value) => {
   return ["ACTIVE", "INACTIVE", "SUSPENDED"].includes(normalized)
     ? normalized
     : undefined;
+};
+
+/** Map sheet values like "6th" / "Class 6" → "Grade 6" for Class master list. */
+const canonicalizeClassName = (raw) => {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return "";
+  const key = normalizeClassKey(trimmed);
+  if (!key) return trimmed;
+  return classKeyToLabel(key) || trimmed;
+};
+
+const canonicalizeSectionName = (raw) => String(raw || "").trim().toUpperCase();
+
+const resolveSchoolSession = async (schoolId) => {
+  let session = await Session.findOne({ schoolId, isActive: true }).lean();
+  if (!session) {
+    session = await Session.findOne({ schoolId }).sort({ createdAt: -1 }).lean();
+  }
+  return session;
+};
+
+/**
+ * Ensure Class + Section exist for bulk admission. Creates them on the school's
+ * active (or latest) session when missing. Returns canonical names for the student.
+ */
+const ensureClassAndSectionForBulk = async ({
+  schoolId,
+  sessionId,
+  classNameRaw,
+  sectionRaw,
+  classCache,
+  sectionCache,
+  createdMeta,
+}) => {
+  const className = canonicalizeClassName(classNameRaw);
+  const sectionName = canonicalizeSectionName(sectionRaw);
+  if (!className || !sectionName) {
+    throw new Error("className and section are required");
+  }
+
+  const classKey = normalizeClassKey(className) || className.toLowerCase();
+  const classCacheKey = `${String(sessionId)}:${classKey}`;
+
+  let classDoc = classCache.get(classCacheKey);
+  if (!classDoc) {
+    classDoc = await Class.findOne({ schoolId, sessionId, name: className });
+    if (!classDoc) {
+      const sessionClasses = await Class.find({ schoolId, sessionId }).lean();
+      const matched = sessionClasses.find(
+        (c) => normalizeClassKey(c.name) === classKey || String(c.name).trim().toLowerCase() === className.toLowerCase(),
+      );
+      if (matched) {
+        classDoc = await Class.findById(matched._id);
+      }
+    }
+    if (!classDoc) {
+      try {
+        classDoc = await Class.create({ name: className, sessionId, schoolId });
+        createdMeta.classes.add(className);
+      } catch (err) {
+        classDoc = await Class.findOne({ schoolId, sessionId, name: className });
+        if (!classDoc) throw err;
+      }
+    }
+    classCache.set(classCacheKey, classDoc);
+  }
+
+  const sectionCacheKey = `${String(classDoc._id)}:${sectionName}`;
+  let sectionDoc = sectionCache.get(sectionCacheKey);
+  if (!sectionDoc) {
+    sectionDoc = await Section.findOne({
+      schoolId,
+      classId: classDoc._id,
+      name: sectionName,
+    });
+    if (!sectionDoc) {
+      const classSections = await Section.find({ schoolId, classId: classDoc._id }).lean();
+      const matched = classSections.find(
+        (s) => String(s.name || "").trim().toUpperCase() === sectionName,
+      );
+      if (matched) {
+        sectionDoc = await Section.findById(matched._id);
+      }
+    }
+    if (!sectionDoc) {
+      try {
+        sectionDoc = await Section.create({
+          name: sectionName,
+          classId: classDoc._id,
+          sessionId,
+          schoolId,
+        });
+        createdMeta.sections.add(`${classDoc.name} - ${sectionName}`);
+      } catch (err) {
+        sectionDoc = await Section.findOne({
+          schoolId,
+          classId: classDoc._id,
+          name: sectionName,
+        });
+        if (!sectionDoc) throw err;
+      }
+    }
+    sectionCache.set(sectionCacheKey, sectionDoc);
+  }
+
+  return {
+    className: classDoc.name,
+    section: sectionDoc.name,
+  };
 };
 
 /* CREATE ADMISSION */
@@ -571,6 +684,7 @@ export const createAdmission = async (req, res, next) => {
  * - fatherEmail (for parent user email; placeholder will be used if missing)
  * - motherEmail (not used for login currently; included for future)
  * - currentAddress, permanentAddress (student residence), correspondenceAddress (mailing)
+ * - className / section: auto-creates Class and Section on the school's active session if missing
  *
  * Request (multipart/form-data):
  * - excelFile: Excel/CSV file
@@ -710,6 +824,18 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
 
     // Parent user cache: phone/username -> userId
     const parentUserCache = new Map();
+    const classCache = new Map();
+    const sectionCache = new Map();
+    const createdMeta = { classes: new Set(), sections: new Set() };
+
+    const schoolSession = await resolveSchoolSession(schoolId);
+    if (!schoolSession?._id) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "No academic session found for this school. Create and activate a session before bulk admission.",
+      });
+    }
 
     const created = [];
     const errors = [];
@@ -851,6 +977,16 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           continue;
         }
 
+        const ensured = await ensureClassAndSectionForBulk({
+          schoolId,
+          sessionId: schoolSession._id,
+          classNameRaw: className,
+          sectionRaw: section,
+          classCache,
+          sectionCache,
+          createdMeta,
+        });
+
         const studentPhone = toMaybePhone(pick(row, ["studentPhone", "student phone", "Student Phone", "phone"]));
 
         const currentAddr = toMaybeStr(
@@ -886,8 +1022,8 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           dob: dob || undefined,
           admissionNumber: normalizedAdmissionNumber,
           rollNumber: toMaybeStr(rollNumber),
-          className: toStr(className),
-          section: toStr(section),
+          className: ensured.className,
+          section: ensured.section,
           admissionDate,
           address: addressVal,
           correspondenceAddress: correspondenceAddr || "",
@@ -1021,6 +1157,8 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
         createdCount: created.length,
         skippedCount: skipped.length,
         errorCount: errors.length,
+        createdClasses: [...createdMeta.classes],
+        createdSections: [...createdMeta.sections],
         created,
         skipped,
         errors: errors.length ? errors : undefined,
