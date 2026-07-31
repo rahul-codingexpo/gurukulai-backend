@@ -252,19 +252,48 @@ const classNameMatchesKey = (name, classKey, className) => {
   return Boolean(key && classKey && key === classKey);
 };
 
-const buildFeeTypeCode = (name, codeRaw) => {
+const buildFeeTypeCode = (name, codeRaw, amount = 0) => {
+  const amountPart = String(Math.round(Number(amount) || 0));
   const fromSheet = String(codeRaw || "")
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
     .slice(0, 10);
   if (fromSheet) return fromSheet;
+
   const fromName = String(name || "")
     .trim()
     .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "")
-    .slice(0, 10);
-  return fromName || "FEETYPE";
+    .replace(/[^A-Z0-9]+/g, "");
+  // Keep within maxlength 10: name prefix + amount (e.g. HOSTEL800)
+  const maxNameLen = Math.max(1, 10 - amountPart.length);
+  const auto = `${fromName.slice(0, maxNameLen)}${amountPart}`.slice(0, 10);
+  return auto || `F${amountPart}`.slice(0, 10) || "FEETYPE";
+};
+
+const makeUniqueFeeTypeCode = async (schoolId, preferredCode, amount) => {
+  let code = String(preferredCode || "FEETYPE")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 10) || "FEETYPE";
+
+  const amountPart = String(Math.round(Number(amount) || 0)).slice(0, 6);
+  for (let i = 0; i < 20; i += 1) {
+    const existing = await FeeType.findOne({ schoolId, code }).select("_id amount").lean();
+    if (!existing) return code;
+    const suffix = i === 0 ? amountPart : `${amountPart}${i}`.slice(0, 4);
+    const base = code.replace(/\d+$/, "").slice(0, Math.max(1, 10 - suffix.length)) || "F";
+    code = `${base}${suffix}`.slice(0, 10);
+  }
+  return `${Date.now()}`.slice(-10);
+};
+
+const parseFeeAmount = (raw) => {
+  if (raw === undefined || raw === null || raw === "") return 0;
+  const cleaned = String(raw).replace(/[^0-9.-]/g, "");
+  const num = Number(cleaned);
+  return Number.isFinite(num) && num >= 0 ? num : 0;
 };
 
 const normalizeFeePeriod = (raw) => {
@@ -387,8 +416,9 @@ const ensureClassAndSectionForBulk = async ({
 };
 
 /**
- * Find or create fee type from Excel, and link the student's class to it
- * so Fee Types page shows the same fee type against that class.
+ * Find or create fee type from Excel keyed by name + amount + period.
+ * Same name with different amounts (e.g. Hostel 800 vs Hostel 650) stays separate;
+ * classes that share name+amount+period share one fee type.
  */
 const ensureFeeTypeForBulk = async ({
   schoolId,
@@ -403,35 +433,52 @@ const ensureFeeTypeForBulk = async ({
   const name = String(feeTypeRaw || "").trim();
   if (!name || !classId) return null;
 
-  const code = buildFeeTypeCode(name, feeCodeRaw);
-  const cacheKey = `${String(schoolId)}:${code}`;
+  const amount = parseFeeAmount(feeAmountRaw);
+  const period = normalizeFeePeriod(feePeriodRaw);
+  const nameKey = name.toLowerCase();
+  const cacheKey = `${String(schoolId)}:${nameKey}:${amount}:${period}`;
 
   let feeType = feeTypeCache.get(cacheKey);
   if (!feeType) {
+    // Match only same name + amount + period (do NOT merge different amounts)
     feeType = await FeeType.findOne({
       schoolId,
-      $or: [{ code }, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") }],
+      amount,
+      period,
+      name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
     });
 
     if (!feeType) {
-      const amountNum = Number(feeAmountRaw);
-      const amount = Number.isFinite(amountNum) && amountNum >= 0 ? amountNum : 0;
+      const preferredCode = buildFeeTypeCode(name, feeCodeRaw, amount);
+      const code = await makeUniqueFeeTypeCode(schoolId, preferredCode, amount);
       try {
         feeType = await FeeType.create({
           schoolId,
           name,
           code,
           amount,
-          period: normalizeFeePeriod(feePeriodRaw),
+          period,
           classIds: [classId],
           status: "Active",
         });
-        createdMeta.feeTypes.add(`${name} (${code})`);
+        createdMeta.feeTypes.add(`${name} ₹${amount} (${code})`);
       } catch (err) {
-        feeType = await FeeType.findOne({ schoolId, code });
+        feeType = await FeeType.findOne({
+          schoolId,
+          amount,
+          period,
+          name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+        });
+        if (!feeType) {
+          const byCode = await FeeType.findOne({ schoolId, code });
+          if (byCode && Number(byCode.amount) === amount && byCode.period === period) {
+            feeType = byCode;
+          }
+        }
         if (!feeType) throw err;
       }
     }
+
     feeTypeCache.set(cacheKey, feeType);
   }
 
@@ -443,7 +490,7 @@ const ensureFeeTypeForBulk = async ({
       { new: true },
     );
     feeTypeCache.set(cacheKey, feeType);
-    createdMeta.feeTypeLinks.add(`${feeType.name} → class`);
+    createdMeta.feeTypeLinks.add(`${feeType.name} ₹${amount} → class`);
   }
 
   return feeType;

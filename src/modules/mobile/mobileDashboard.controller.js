@@ -2,6 +2,7 @@ import Student from "../student/student.model.js";
 import Staff from "../staff/staff.model.js";
 import Timetable from "../timetable/timetable.model.js";
 import ClassTimetable from "../classTimetable/classTimetable.model.js";
+import { formatEntrySubjects } from "../classTimetable/classTimetable.utils.js";
 import Event from "../events/event.model.js";
 import EventRead from "./eventRead.model.js";
 
@@ -224,20 +225,24 @@ export const getTeacherDashboard = async (req, res, next) => {
         .populate("classId", "name")
         .populate("sectionId", "name")
         .populate("subjectId", "name code")
+        .populate("subjectIds", "name code")
         .sort({ startTime: 1 })
         .lean();
 
-      todayTimetable = ctEntries.map((e) => ({
-        _id: e._id,
-        subject: e.subjectId?.name || null,
-        subjectCode: e.subjectId?.code || null,
-        className: e.classId?.name || null,
-        section: e.sectionId?.name || null,
-        startTime: e.startTime || null,
-        endTime: e.endTime || null,
-        periodNumber: null,
-        isNow: isCurrentSlot(e.startTime, e.endTime),
-      }));
+      todayTimetable = ctEntries.map((e) => {
+        const subjects = formatEntrySubjects(e);
+        return {
+          _id: e._id,
+          subject: subjects.subject || null,
+          subjectCode: subjects.subjectCode || null,
+          className: e.classId?.name || null,
+          section: e.sectionId?.name || null,
+          startTime: e.startTime || null,
+          endTime: e.endTime || null,
+          periodNumber: null,
+          isNow: isCurrentSlot(e.startTime, e.endTime),
+        };
+      });
     }
 
     // Recent announcements/events

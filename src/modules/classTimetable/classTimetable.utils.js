@@ -7,8 +7,43 @@ const POPULATE_PATHS = [
   { path: "classId", select: "name" },
   { path: "sectionId", select: "name" },
   { path: "subjectId", select: "name code" },
+  { path: "subjectIds", select: "name code" },
   { path: "teacherId", select: "name" },
 ];
+
+/** Accept subjectIds[] or legacy subjectId → unique string ids. */
+export const normalizeSubjectIdsFromBody = (body = {}) => {
+  const raw = Array.isArray(body.subjectIds)
+    ? body.subjectIds
+    : body.subjectId != null && body.subjectId !== ""
+      ? [body.subjectId]
+      : [];
+  return [...new Set(raw.map((id) => String(id || "").trim()).filter(Boolean))];
+};
+
+/** Display helpers for populated ClassTimetable rows (subjectIds or legacy subjectId). */
+export const formatEntrySubjects = (entry) => {
+  const list =
+    Array.isArray(entry?.subjectIds) && entry.subjectIds.length
+      ? entry.subjectIds
+      : entry?.subjectId
+        ? [entry.subjectId]
+        : [];
+  const names = list
+    .map((s) => (s && typeof s === "object" ? s.name : ""))
+    .map((n) => String(n || "").trim())
+    .filter(Boolean);
+  const codes = list
+    .map((s) => (s && typeof s === "object" ? s.code : ""))
+    .map((c) => String(c || "").trim())
+    .filter(Boolean);
+  return {
+    subject: names.join(" / "),
+    subjectCode: codes.join(" / "),
+    subjectId: list[0]?._id ?? list[0] ?? null,
+    subjectIds: list.map((s) => s?._id ?? s).filter(Boolean),
+  };
+};
 
 /**
  * Timetable teacherId must be a User _id (see classTimetable.model.js).

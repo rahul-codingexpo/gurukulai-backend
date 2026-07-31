@@ -24,8 +24,16 @@ const classTimetableSchema = new mongoose.Schema(
     subjectId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subject",
-      required: true,
+      required: true, // primary / first subject (legacy + mobile compat)
     },
+
+    /** All subjects taught in this slot (one teacher can teach multiple). */
+    subjectIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Subject",
+      },
+    ],
 
     startTime: {
       type: String,

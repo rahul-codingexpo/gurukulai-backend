@@ -3,6 +3,7 @@ import {
   resolveTeacherUserId,
   findPopulatedEntryById,
   enrichTimetableTeacherFields,
+  normalizeSubjectIdsFromBody,
   POPULATE_PATHS,
 } from "./classTimetable.utils.js";
 
@@ -13,6 +14,14 @@ const resolveSchoolId = (req) => {
   }
   return req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
 };
+
+const SUBJECT_POPULATE = [
+  { path: "classId", select: "name" },
+  { path: "sectionId", select: "name" },
+  { path: "subjectId", select: "name code type" },
+  { path: "subjectIds", select: "name code type" },
+  { path: "teacherId", select: "name" },
+];
 
 export const createClassTimetable = async (req, res, next) => {
   try {
@@ -30,7 +39,6 @@ export const createClassTimetable = async (req, res, next) => {
     const {
       classId,
       sectionId,
-      subjectId,
       startTime,
       endTime,
       day,
@@ -39,11 +47,14 @@ export const createClassTimetable = async (req, res, next) => {
       teacherId,
     } = req.body;
 
+    const subjectIds = normalizeSubjectIdsFromBody(req.body);
+    const subjectId = subjectIds[0];
+
     if (!classId || !sectionId || !subjectId || !startTime || !endTime || !day || !teacherId) {
       return res.status(400).json({
         success: false,
         message:
-          "classId, sectionId, subjectId, startTime, endTime, day and teacherId are required",
+          "classId, sectionId, subjectId/subjectIds, startTime, endTime, day and teacherId are required",
       });
     }
 
@@ -90,6 +101,7 @@ export const createClassTimetable = async (req, res, next) => {
       classId,
       sectionId,
       subjectId,
+      subjectIds,
       startTime,
       endTime,
       day,
@@ -164,12 +176,7 @@ export const getClassTimetableByClassAndSection = async (req, res, next) => {
       classId,
       sectionId,
     })
-      .populate([
-        { path: "classId", select: "name" },
-        { path: "sectionId", select: "name" },
-        { path: "subjectId", select: "name code type" },
-        { path: "teacherId", select: "name" },
-      ])
+      .populate(SUBJECT_POPULATE)
       .sort({ day: 1, startTime: 1 });
 
     await enrichTimetableTeacherFields(entries);
@@ -205,6 +212,7 @@ export const getClassTimetableByTeacher = async (req, res, next) => {
       .populate("classId", "name")
       .populate("sectionId", "name")
       .populate("subjectId", "name code")
+      .populate("subjectIds", "name code")
       .sort({ day: 1, startTime: 1 });
 
     res.json({
@@ -232,12 +240,7 @@ export const getClassTimetableById = async (req, res, next) => {
     const entry = await ClassTimetable.findOne({
       _id: req.params.id,
       schoolId,
-    }).populate([
-      { path: "classId", select: "name" },
-      { path: "sectionId", select: "name" },
-      { path: "subjectId", select: "name code type" },
-      { path: "teacherId", select: "name" },
-    ]);
+    }).populate(SUBJECT_POPULATE);
 
     if (!entry) {
       return res.status(404).json({
@@ -285,7 +288,6 @@ export const updateClassTimetable = async (req, res, next) => {
     const {
       classId,
       sectionId,
-      subjectId,
       startTime,
       endTime,
       day,
@@ -296,7 +298,17 @@ export const updateClassTimetable = async (req, res, next) => {
 
     if (classId !== undefined) entry.classId = classId;
     if (sectionId !== undefined) entry.sectionId = sectionId;
-    if (subjectId !== undefined) entry.subjectId = subjectId;
+    if (req.body.subjectIds !== undefined || req.body.subjectId !== undefined) {
+      const subjectIds = normalizeSubjectIdsFromBody(req.body);
+      if (!subjectIds.length) {
+        return res.status(400).json({
+          success: false,
+          message: "At least one subject is required",
+        });
+      }
+      entry.subjectIds = subjectIds;
+      entry.subjectId = subjectIds[0];
+    }
     if (startTime !== undefined) entry.startTime = startTime;
     if (endTime !== undefined) entry.endTime = endTime;
     if (day !== undefined) entry.day = day;

@@ -1,5 +1,6 @@
 import Timetable from "../timetable/timetable.model.js";
 import ClassTimetable from "../classTimetable/classTimetable.model.js";
+import { formatEntrySubjects } from "../classTimetable/classTimetable.utils.js";
 import Student from "../student/student.model.js";
 import Staff from "../staff/staff.model.js";
 import ClassModel from "../academic/class.model.js";
@@ -294,24 +295,28 @@ export const getMobileTimetable = async (req, res, next) => {
         .populate("classId", "name")
         .populate("sectionId", "name")
         .populate("subjectId", "name code")
+        .populate("subjectIds", "name code")
         .populate("teacherId", "name")
         .sort({ startTime: 1 })
         .lean();
 
-      slots = ctEntries.map((e) => ({
-        _id: e._id,
-        subject: e.subjectId?.name || "",
-        subjectCode: e.subjectId?.code || "",
-        className: e.classId?.name || "",
-        section: e.sectionId?.name || "",
-        teacherName: e.teacherId?.name || "",
-        roomNumber: e.roomNumber || "",
-        startTime: e.startTime,
-        endTime: e.endTime,
-        day: e.day,
-        shortDay: SHORT_DAY[e.day] || e.day,
-        periodNumber: null,
-      }));
+      slots = ctEntries.map((e) => {
+        const subjects = formatEntrySubjects(e);
+        return {
+          _id: e._id,
+          subject: subjects.subject || "",
+          subjectCode: subjects.subjectCode || "",
+          className: e.classId?.name || "",
+          section: e.sectionId?.name || "",
+          teacherName: e.teacherId?.name || "",
+          roomNumber: e.roomNumber || "",
+          startTime: e.startTime,
+          endTime: e.endTime,
+          day: e.day,
+          shortDay: SHORT_DAY[e.day] || e.day,
+          periodNumber: null,
+        };
+      });
     }
 
     res.json({
@@ -469,26 +474,30 @@ export const getMobileTimetableCourses = async (req, res, next) => {
         .populate("classId", "name")
         .populate("sectionId", "name")
         .populate("subjectId", "name code")
+        .populate("subjectIds", "name code")
         .populate("teacherId", "name")
         .sort({ day: 1, startTime: 1 })
         .lean();
 
-      normalized = ctEntries.map((e) => ({
-        classId: e.classId?._id,
-        sectionId: e.sectionId?._id,
-        subjectId: e.subjectId?._id,
-        teacherId: e.teacherId?._id,
-        subject: e.subjectId?.name || "",
-        subjectCode: e.subjectId?.code || "",
-        className: e.classId?.name || "",
-        section: e.sectionId?.name || "",
-        teacherName: e.teacherId?.name || "",
-        roomNumber: e.roomNumber || "",
-        startTime: e.startTime,
-        endTime: e.endTime,
-        day: e.day,
-        joinLink: e.joinLink && String(e.joinLink).trim() ? String(e.joinLink).trim() : null,
-      }));
+      normalized = ctEntries.map((e) => {
+        const subjects = formatEntrySubjects(e);
+        return {
+          classId: e.classId?._id,
+          sectionId: e.sectionId?._id,
+          subjectId: subjects.subjectId,
+          teacherId: e.teacherId?._id,
+          subject: subjects.subject || "",
+          subjectCode: subjects.subjectCode || "",
+          className: e.classId?.name || "",
+          section: e.sectionId?.name || "",
+          teacherName: e.teacherId?.name || "",
+          roomNumber: e.roomNumber || "",
+          startTime: e.startTime,
+          endTime: e.endTime,
+          day: e.day,
+          joinLink: e.joinLink && String(e.joinLink).trim() ? String(e.joinLink).trim() : null,
+        };
+      });
     }
 
     const groupMap = new Map();
