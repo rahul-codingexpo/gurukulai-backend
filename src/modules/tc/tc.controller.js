@@ -80,19 +80,9 @@ const linkStudent = async ({ schoolId, studentId, admissionNumber }) => {
 };
 
 const validateGeneratedContent = (content = {}) => {
-  const required = [
-    "studentName",
-    "fatherName",
-    "motherName",
-    "classLastAttended",
-    "section",
-    "leavingDate",
-    "reasonForLeaving",
-  ];
-
-  const missing = required.filter((key) => !toStr(content[key]));
-  if (missing.length) {
-    const err = new Error(`Missing required content fields: ${missing.join(", ")}`);
+  // Student identity is enough; leaving date, reason, parents, etc. are optional.
+  if (!toStr(content.studentName)) {
+    const err = new Error("Missing required content fields: studentName");
     err.statusCode = 400;
     throw err;
   }

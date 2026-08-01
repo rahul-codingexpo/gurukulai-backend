@@ -128,7 +128,6 @@ import TransferCertificate from "../tc/tc.model.js";
 import Class from "../academic/class.model.js";
 import Section from "../academic/section.model.js";
 import Session from "../academic/session.model.js";
-import FeeType from "../accounting/feeType.model.js";
 import bcrypt from "bcryptjs";
 import XLSX from "xlsx";
 import fs from "fs";
@@ -221,8 +220,6 @@ const normalizeStudentStatus = (value) => {
     : undefined;
 };
 
-const FEE_PERIODS = ["Monthly", "Quarterly", "Half-Yearly", "Yearly", "One-Time"];
-
 /** Map sheet values like "6th" / "Class 6" → "Grade 6" for Class master list. */
 const canonicalizeClassName = (raw) => {
   const trimmed = String(raw || "").trim();
@@ -250,64 +247,6 @@ const classNameMatchesKey = (name, classKey, className) => {
   if (n.toLowerCase() === String(className || "").toLowerCase()) return true;
   const key = normalizeClassKey(n.replace(/^class\s+/i, "").trim() || n);
   return Boolean(key && classKey && key === classKey);
-};
-
-const buildFeeTypeCode = (name, codeRaw, amount = 0) => {
-  const amountPart = String(Math.round(Number(amount) || 0));
-  const fromSheet = String(codeRaw || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .slice(0, 10);
-  if (fromSheet) return fromSheet;
-
-  const fromName = String(name || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "");
-  // Keep within maxlength 10: name prefix + amount (e.g. HOSTEL800)
-  const maxNameLen = Math.max(1, 10 - amountPart.length);
-  const auto = `${fromName.slice(0, maxNameLen)}${amountPart}`.slice(0, 10);
-  return auto || `F${amountPart}`.slice(0, 10) || "FEETYPE";
-};
-
-const makeUniqueFeeTypeCode = async (schoolId, preferredCode, amount) => {
-  let code = String(preferredCode || "FEETYPE")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .slice(0, 10) || "FEETYPE";
-
-  const amountPart = String(Math.round(Number(amount) || 0)).slice(0, 6);
-  for (let i = 0; i < 20; i += 1) {
-    const existing = await FeeType.findOne({ schoolId, code }).select("_id amount").lean();
-    if (!existing) return code;
-    const suffix = i === 0 ? amountPart : `${amountPart}${i}`.slice(0, 4);
-    const base = code.replace(/\d+$/, "").slice(0, Math.max(1, 10 - suffix.length)) || "F";
-    code = `${base}${suffix}`.slice(0, 10);
-  }
-  return `${Date.now()}`.slice(-10);
-};
-
-const parseFeeAmount = (raw) => {
-  if (raw === undefined || raw === null || raw === "") return 0;
-  const cleaned = String(raw).replace(/[^0-9.-]/g, "");
-  const num = Number(cleaned);
-  return Number.isFinite(num) && num >= 0 ? num : 0;
-};
-
-const normalizeFeePeriod = (raw) => {
-  const value = String(raw || "").trim();
-  if (!value) return "Monthly";
-  const found = FEE_PERIODS.find((p) => p.toLowerCase() === value.toLowerCase());
-  if (found) return found;
-  const compact = value.toLowerCase().replace(/[\s_-]+/g, "");
-  if (compact === "month" || compact === "monthly") return "Monthly";
-  if (compact === "quarter" || compact === "quarterly") return "Quarterly";
-  if (compact === "halfyearly" || compact === "halfyear") return "Half-Yearly";
-  if (compact === "yearly" || compact === "annual" || compact === "annually") return "Yearly";
-  if (compact === "onetime" || compact === "once") return "One-Time";
-  return "Monthly";
 };
 
 /**
@@ -413,87 +352,6 @@ const ensureClassAndSectionForBulk = async ({
     className: classDoc.name,
     section: sectionDoc.name,
   };
-};
-
-/**
- * Find or create fee type from Excel keyed by name + amount + period.
- * Same name with different amounts (e.g. Hostel 800 vs Hostel 650) stays separate;
- * classes that share name+amount+period share one fee type.
- */
-const ensureFeeTypeForBulk = async ({
-  schoolId,
-  classId,
-  feeTypeRaw,
-  feeCodeRaw,
-  feeAmountRaw,
-  feePeriodRaw,
-  feeTypeCache,
-  createdMeta,
-}) => {
-  const name = String(feeTypeRaw || "").trim();
-  if (!name || !classId) return null;
-
-  const amount = parseFeeAmount(feeAmountRaw);
-  const period = normalizeFeePeriod(feePeriodRaw);
-  const nameKey = name.toLowerCase();
-  const cacheKey = `${String(schoolId)}:${nameKey}:${amount}:${period}`;
-
-  let feeType = feeTypeCache.get(cacheKey);
-  if (!feeType) {
-    // Match only same name + amount + period (do NOT merge different amounts)
-    feeType = await FeeType.findOne({
-      schoolId,
-      amount,
-      period,
-      name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-    });
-
-    if (!feeType) {
-      const preferredCode = buildFeeTypeCode(name, feeCodeRaw, amount);
-      const code = await makeUniqueFeeTypeCode(schoolId, preferredCode, amount);
-      try {
-        feeType = await FeeType.create({
-          schoolId,
-          name,
-          code,
-          amount,
-          period,
-          classIds: [classId],
-          status: "Active",
-        });
-        createdMeta.feeTypes.add(`${name} ₹${amount} (${code})`);
-      } catch (err) {
-        feeType = await FeeType.findOne({
-          schoolId,
-          amount,
-          period,
-          name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-        });
-        if (!feeType) {
-          const byCode = await FeeType.findOne({ schoolId, code });
-          if (byCode && Number(byCode.amount) === amount && byCode.period === period) {
-            feeType = byCode;
-          }
-        }
-        if (!feeType) throw err;
-      }
-    }
-
-    feeTypeCache.set(cacheKey, feeType);
-  }
-
-  const alreadyLinked = (feeType.classIds || []).some((id) => String(id) === String(classId));
-  if (!alreadyLinked) {
-    feeType = await FeeType.findByIdAndUpdate(
-      feeType._id,
-      { $addToSet: { classIds: classId } },
-      { new: true },
-    );
-    feeTypeCache.set(cacheKey, feeType);
-    createdMeta.feeTypeLinks.add(`${feeType.name} ₹${amount} → class`);
-  }
-
-  return feeType;
 };
 
 /* CREATE ADMISSION */
@@ -993,12 +851,9 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
     const parentUserCache = new Map();
     const classCache = new Map();
     const sectionCache = new Map();
-    const feeTypeCache = new Map();
     const createdMeta = {
       classes: new Set(),
       sections: new Set(),
-      feeTypes: new Set(),
-      feeTypeLinks: new Set(),
     };
 
     const schoolSession = await resolveSchoolSession(schoolId);
@@ -1160,42 +1015,6 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
           createdMeta,
         });
 
-        const feeTypeName = pick(row, [
-          "feeType",
-          "Fee Type",
-          "feeTypeName",
-          "Fee Type Name",
-          "fee name",
-          "Fee Name",
-        ]);
-        const feeTypeCode = pick(row, ["feeTypeCode", "Fee Type Code", "feeCode", "Fee Code"]);
-        const feeAmount = pick(row, [
-          "feeAmount",
-          "Fee Amount",
-          "feeTypeAmount",
-          "Fee Type Amount",
-        ]);
-        const feePeriod = pick(row, [
-          "feePeriod",
-          "Fee Period",
-          "feeTypePeriod",
-          "Fee Type Period",
-        ]);
-
-        let feeTypeDoc = null;
-        if (toMaybeStr(feeTypeName)) {
-          feeTypeDoc = await ensureFeeTypeForBulk({
-            schoolId,
-            classId: ensured.classId,
-            feeTypeRaw: feeTypeName,
-            feeCodeRaw: feeTypeCode,
-            feeAmountRaw: feeAmount,
-            feePeriodRaw: feePeriod,
-            feeTypeCache,
-            createdMeta,
-          });
-        }
-
         const studentPhone = toMaybePhone(pick(row, ["studentPhone", "student phone", "Student Phone", "phone"]));
 
         const currentAddr = toMaybeStr(
@@ -1261,15 +1080,6 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
             marks: toMaybeStr(marks),
             board: toMaybeStr(board),
           },
-          feeStructure: feeTypeDoc
-            ? [
-                {
-                  feeType: String(feeTypeDoc._id),
-                  period: feeTypeDoc.period,
-                  amount: feeTypeDoc.amount,
-                },
-              ]
-            : undefined,
           status: normalizeStudentStatus(status),
           route: toMaybeStr(route),
           group: toMaybeStr(group),
@@ -1377,8 +1187,6 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
         errorCount: errors.length,
         createdClasses: [...createdMeta.classes],
         createdSections: [...createdMeta.sections],
-        createdFeeTypes: [...createdMeta.feeTypes],
-        linkedFeeTypes: [...createdMeta.feeTypeLinks],
         created,
         skipped,
         errors: errors.length ? errors : undefined,

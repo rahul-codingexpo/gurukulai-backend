@@ -839,10 +839,10 @@ export const updateInvoice = async (req, res, next) => {
       let pct = invoice.discountPercent ?? 0;
       if (discountPercent !== undefined) pct = Number(discountPercent);
 
-      if (Number.isNaN(base) || base <= 0) {
+      if (Number.isNaN(base) || base < 0) {
         return res.status(400).json({
           success: false,
-          message: "Base amount must be greater than 0",
+          message: "Base amount must be 0 or greater",
         });
       }
       if (Number.isNaN(pct) || pct < 0 || pct > 100) {
@@ -853,10 +853,10 @@ export const updateInvoice = async (req, res, next) => {
       }
 
       const computed = computeInvoiceAmounts(base, pct);
-      if (computed.amount <= 0) {
+      if (computed.amount < 0) {
         return res.status(400).json({
           success: false,
-          message: "Final payable after discount must be greater than 0",
+          message: "Final payable after discount cannot be negative",
         });
       }
       if (computed.amount < invoice.paid) {
