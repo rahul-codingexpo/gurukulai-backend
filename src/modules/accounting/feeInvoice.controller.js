@@ -83,6 +83,42 @@ async function getNextInvoiceNumber(schoolId) {
 async function markOverdue(schoolId) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  // Repair inconsistent "Paid" from old pre-save (paid >= amount treated 0>=0 as Paid)
+  await FeeInvoice.updateMany(
+    {
+      schoolId,
+      status: "Paid",
+      amount: { $lte: 0 },
+      paid: { $lte: 0 },
+    },
+    { $set: { status: "Pending" }, $unset: { paidDate: "" } }
+  );
+  await FeeInvoice.updateMany(
+    {
+      schoolId,
+      status: "Paid",
+      $expr: {
+        $and: [{ $gt: ["$amount", 0] }, { $lte: ["$paid", 0] }],
+      },
+    },
+    { $set: { status: "Pending" }, $unset: { paidDate: "" } }
+  );
+  await FeeInvoice.updateMany(
+    {
+      schoolId,
+      status: "Paid",
+      $expr: {
+        $and: [
+          { $gt: ["$amount", 0] },
+          { $gt: ["$paid", 0] },
+          { $lt: ["$paid", "$amount"] },
+        ],
+      },
+    },
+    { $set: { status: "Partial" } }
+  );
+
   await FeeInvoice.updateMany(
     {
       schoolId,
@@ -163,8 +199,15 @@ export const createInvoice = async (req, res, next) => {
         : null;
 
     if (initialStatus === "Paid") {
-      paid = computed.amount;
-      paidDate = new Date();
+      if (computed.amount <= 0) {
+        // No payable amount — keep as Due instead of fake Paid (0 >= 0)
+        paid = 0;
+        paidDate = null;
+        initialStatus = "Pending";
+      } else {
+        paid = computed.amount;
+        paidDate = new Date();
+      }
     } else if (initialStatus === "Partial") {
       if (requestedPaid == null || Number.isNaN(requestedPaid) || requestedPaid <= 0) {
         return res.status(400).json({
@@ -189,7 +232,11 @@ export const createInvoice = async (req, res, next) => {
       }
     } else if (requestedPaid != null && !Number.isNaN(requestedPaid) && requestedPaid > 0) {
       // Allow optional paid amount even if status wasn't Partial
-      if (requestedPaid >= computed.amount) {
+      if (computed.amount <= 0) {
+        paid = 0;
+        paidDate = null;
+        // keep requested status (usually Pending)
+      } else if (requestedPaid >= computed.amount) {
         paid = computed.amount;
         paidDate = new Date();
         initialStatus = "Paid";
@@ -877,10 +924,13 @@ export const updateInvoice = async (req, res, next) => {
     if (status !== undefined && ["Pending", "Overdue", "Partial", "Paid", "Cancelled"].includes(status)) {
       invoice.status = status;
     }
-    if (invoice.paid >= invoice.amount) {
+    const amt = Number(invoice.amount) || 0;
+    const paidAmt = Number(invoice.paid) || 0;
+    // Only auto-reconcile when there is a real payable amount (not ₹0 lines)
+    if (amt > 0 && paidAmt >= amt) {
       invoice.status = "Paid";
       if (!invoice.paidDate) invoice.paidDate = new Date();
-    } else if (invoice.paid > 0) {
+    } else if (amt > 0 && paidAmt > 0 && paidAmt < amt) {
       invoice.status = "Partial";
     }
     await invoice.save();

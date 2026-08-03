@@ -117,12 +117,24 @@ feeInvoiceSchema.pre("save", async function () {
       this.discountAmount = 0;
     }
   }
-  if (this.paid >= this.amount) {
+
+  const amount = Number(this.amount) || 0;
+  const paid = Number(this.paid) || 0;
+
+  // Do NOT treat ₹0 invoices as Paid just because paid(0) >= amount(0).
+  // That incorrectly flipped "Due" (Pending) to "Paid" for free / zero fee lines.
+  if (amount > 0 && paid >= amount) {
     this.status = "Paid";
     if (!this.paidDate) this.paidDate = new Date();
-  } else if (this.paid > 0) {
+  } else if (amount > 0 && paid > 0 && paid < amount) {
     this.status = "Partial";
-  } else if (this.dueDate && this.dueDate < new Date() && this.status === "Pending") {
+  } else if (
+    amount > 0 &&
+    paid <= 0 &&
+    this.dueDate &&
+    this.dueDate < new Date() &&
+    this.status === "Pending"
+  ) {
     this.status = "Overdue";
   }
 });

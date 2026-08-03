@@ -90,10 +90,12 @@ export const recordPayment = async (req, res, next) => {
       remarks: remarks ? String(remarks).trim() : "",
     });
     invoice.paid += Number(amount);
-    if (invoice.paid >= invoice.amount) {
+    const payable = Number(invoice.amount) || 0;
+    const paidTotal = Number(invoice.paid) || 0;
+    if (payable > 0 && paidTotal >= payable) {
       invoice.status = "Paid";
       invoice.paidDate = new Date();
-    } else {
+    } else if (payable > 0 && paidTotal > 0) {
       invoice.status = "Partial";
     }
     await invoice.save();
