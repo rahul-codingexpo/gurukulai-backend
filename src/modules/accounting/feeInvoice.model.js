@@ -93,6 +93,15 @@ const feeInvoiceSchema = new mongoose.Schema(
       default: undefined,
     },
 
+    /** True when this invoice was created from Past Fee Data (old dues). */
+    isLegacyDue: { type: Boolean, default: false, index: true },
+    pastFeeRecordId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PastFeeRecord",
+      default: null,
+      index: true,
+    },
+
     /** Soft delete flags — record stays in DB and remains visible in Fee Data History. */
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date, default: null },

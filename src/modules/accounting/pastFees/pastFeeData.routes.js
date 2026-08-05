@@ -12,6 +12,8 @@ import {
   updatePastFeeRecord,
   softDeletePastFeeRecord,
   restorePastFeeRecord,
+  preparePastFeeWhatsApp,
+  recordPastFeePayment,
 } from "./pastFeeData.controller.js";
 
 const router = express.Router();
@@ -83,7 +85,7 @@ router.get(
   "/accounting/past-fees",
   protect,
   denySuperAdmin,
-  authorize("Admin", "Principal"),
+  authorize("Admin", "Principal", "Accountant"),
   injectSchool,
   listPastFeeRecords,
 );
@@ -96,6 +98,26 @@ router.get(
   authorize("Admin", "Principal"),
   injectSchool,
   getStudentPastFeeSummary,
+);
+
+// WhatsApp dues reminder (student / parents)
+router.post(
+  "/accounting/past-fees/:id/manual-whatsapp",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  preparePastFeeWhatsApp,
+);
+
+// Record payment → creates/updates linked Fee Invoice
+router.post(
+  "/accounting/past-fees/:id/record-payment",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  recordPastFeePayment,
 );
 
 // Endpoint 6: Edit a single past fee record

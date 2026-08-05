@@ -1,9 +1,15 @@
+import mongoose from "mongoose";
 import XLSX from "xlsx";
 import Student from "../../student/student.model.js";
 import ClassModel from "../../academic/class.model.js";
+import School from "../../school/school.model.js";
 import PastFeeImportBatch from "./pastFeeImportBatch.model.js";
 import PastFeeRecord from "./pastFeeRecord.model.js";
+import FeeInvoice from "../feeInvoice.model.js";
+import FeeType from "../feeType.model.js";
+import Payment from "../payment.model.js";
 import { writeFeeAudit, diffTrackedFields } from "../feeAudit/feeAudit.service.js";
+import { normalizeWhatsAppPhone } from "../../../utils/phone.util.js";
 
 const TRACKED_PAST_FEE_FIELDS = [
   "dueAmount",
@@ -496,6 +502,7 @@ export const listPastFeeRecords = async (req, res, next) => {
     const search = req.query.search ? String(req.query.search).trim() : null;
 
     const status = req.query.status ? String(req.query.status).trim() : null;
+    const studentId = req.query.studentId ? String(req.query.studentId).trim() : null;
 
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 25));
@@ -511,6 +518,12 @@ export const listPastFeeRecords = async (req, res, next) => {
     const includeDeleted = String(req.query.includeDeleted || "").toLowerCase() === "true";
     const match = { schoolId };
     if (!includeDeleted) match.isDeleted = { $ne: true };
+    if (studentId) {
+      if (!mongoose.Types.ObjectId.isValid(studentId)) {
+        return fail(res, 400, "Invalid studentId");
+      }
+      match.studentId = new mongoose.Types.ObjectId(studentId);
+    }
     if (session) match.session = session;
     if (effectiveClassName) match.className = effectiveClassName;
     if (section) match.section = section;
@@ -523,11 +536,15 @@ export const listPastFeeRecords = async (req, res, next) => {
     const statusMatch = (() => {
       if (!status) return null;
       const s = status.toLowerCase();
-      if (s === "unpaid") return "Unpaid";
-      if (s === "partially paid" || s === "partial" || s === "partially") return "Partially Paid";
+      if (s === "due" || s === "unpaid" || s === "pending") return "Due";
+      if (s === "partial" || s === "partially paid" || s === "partially") return "Partial";
+      if (s === "overdue") return "Overdue";
       if (s === "paid") return "Paid";
       return null;
     })();
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
     const pipeline = [
       { $match: match },
@@ -536,13 +553,24 @@ export const listPastFeeRecords = async (req, res, next) => {
           computedBalance: "$balance",
           computedStatus: {
             $cond: [
-              { $eq: ["$balance", 0] },
+              { $lte: ["$balance", 0] },
               "Paid",
               {
                 $cond: [
-                  { $eq: ["$paidAmount", 0] },
-                  "Unpaid",
-                  "Partially Paid",
+                  { $gt: ["$paidAmount", 0] },
+                  "Partial",
+                  {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ne: ["$dueDate", null] },
+                          { $lt: ["$dueDate", today] },
+                        ],
+                      },
+                      "Overdue",
+                      "Due",
+                    ],
+                  },
                 ],
               },
             ],
@@ -574,6 +602,7 @@ export const listPastFeeRecords = async (req, res, next) => {
                 balance: 1,
                 dueDate: 1,
                 remarks: 1,
+                invoiceId: 1,
                 createdAt: 1,
                 updatedAt: 1,
               },
@@ -601,6 +630,7 @@ export const listPastFeeRecords = async (req, res, next) => {
       balance: i.balance,
       dueDate: toISODateOnly(i.dueDate),
       remarks: i.remarks,
+      invoiceId: i.invoiceId || null,
       createdAt: i.createdAt,
     }));
 
@@ -725,23 +755,37 @@ export const updatePastFeeRecord = async (req, res, next) => {
       ? String(req.body.status).trim()
       : null;
     if (requestedStatus) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+
       if (requestedStatus === "Paid") {
         record.paidAmount = record.dueAmount;
         record.balance = 0;
-      } else if (requestedStatus === "Unpaid") {
+      } else if (requestedStatus === "Due" || requestedStatus === "Unpaid") {
         record.paidAmount = 0;
         record.balance = record.dueAmount;
-      } else if (requestedStatus === "Partially Paid") {
+        if (!record.dueDate || record.dueDate < today) {
+          record.dueDate = today;
+        }
+      } else if (requestedStatus === "Overdue") {
+        record.paidAmount = 0;
+        record.balance = record.dueAmount;
+        if (!record.dueDate || record.dueDate >= today) {
+          record.dueDate = yesterday;
+        }
+      } else if (requestedStatus === "Partial" || requestedStatus === "Partially Paid") {
         if (record.paidAmount <= 0 || record.paidAmount >= record.dueAmount) {
           return fail(
             res,
             400,
-            "Partially Paid requires paid amount greater than 0 and less than due amount",
+            "Partial requires paid amount greater than 0 and less than due amount",
           );
         }
         record.balance = Math.max(0, record.dueAmount - record.paidAmount);
       } else {
-        return fail(res, 400, "Invalid status. Use Paid, Unpaid, or Partially Paid");
+        return fail(res, 400, "Invalid status. Use Paid, Due, Partial, or Overdue");
       }
     } else {
       record.balance = Math.max(0, record.dueAmount - record.paidAmount);
@@ -835,6 +879,345 @@ export const restorePastFeeRecord = async (req, res, next) => {
     });
 
     return ok(res, { message: "Past fee record restored", data: record.toObject() });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const roundMoney = (n) => Math.round(Number(n || 0) * 100) / 100;
+
+const formatInrPlain = (n) =>
+  `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+
+const formatDueDateLong = (d) => {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const serializePastFee = (record) => {
+  const obj = typeof record.toObject === "function" ? record.toObject() : { ...record };
+  return {
+    ...obj,
+    dueDate: toISODateOnly(obj.dueDate),
+    invoiceId: obj.invoiceId || null,
+  };
+};
+
+const resolveWhatsAppRecipient = (student, recipient) => {
+  const target = String(recipient || "").toLowerCase() === "student" ? "student" : "parents";
+  if (target === "student") {
+    const phone = normalizeWhatsAppPhone(student?.phone);
+    return {
+      recipient: "student",
+      phone,
+      used: phone ? "student" : null,
+      error: phone ? null : "No valid WhatsApp phone on student",
+    };
+  }
+  const father = normalizeWhatsAppPhone(student?.parents?.father?.phone);
+  if (father) {
+    return { recipient: "parents", phone: father, used: "father", error: null };
+  }
+  const mother = normalizeWhatsAppPhone(student?.parents?.mother?.phone);
+  if (mother) {
+    return { recipient: "parents", phone: mother, used: "mother", error: null };
+  }
+  return {
+    recipient: "parents",
+    phone: null,
+    used: null,
+    error: "No valid WhatsApp phone on parents (father or mother)",
+  };
+};
+
+async function getNextInvoiceNumber(schoolId) {
+  const year = new Date().getFullYear();
+  const prefix = `INV-${year}-`;
+  const last = await FeeInvoice.findOne({
+    schoolId,
+    invoiceNumber: new RegExp(`^${prefix}`),
+  })
+    .sort({ createdAt: -1 })
+    .select("invoiceNumber")
+    .lean();
+  let seq = 1;
+  if (last?.invoiceNumber) {
+    const m = last.invoiceNumber.match(new RegExp(`^${prefix}(\\d+)$`));
+    if (m) seq = parseInt(m[1], 10) + 1;
+  }
+  return `${prefix}${String(seq).padStart(3, "0")}`;
+}
+
+async function ensureBackDuesFeeType(schoolId) {
+  const code = "PASTDUES";
+  let feeType = await FeeType.findOne({ schoolId, code });
+  if (feeType) return feeType;
+  feeType = await FeeType.create({
+    schoolId,
+    name: "Past Dues",
+    code,
+    amount: 0,
+    period: "One-Time",
+    description: "Auto-created for past fee payments recorded from Past Fee Data",
+    classIds: [],
+    status: "Active",
+  });
+  return feeType;
+}
+
+async function ensurePastFeeInvoice(record, schoolId, user) {
+  if (record.invoiceId) {
+    const existing = await FeeInvoice.findOne({
+      _id: record.invoiceId,
+      schoolId,
+      isDeleted: { $ne: true },
+    });
+    if (existing) return existing;
+  }
+
+  const linked = await FeeInvoice.findOne({
+    schoolId,
+    pastFeeRecordId: record._id,
+    isDeleted: { $ne: true },
+  });
+  if (linked) {
+    record.invoiceId = linked._id;
+    await record.save();
+    return linked;
+  }
+
+  const feeType = await ensureBackDuesFeeType(schoolId);
+  const due = roundMoney(record.dueAmount);
+  const paid = roundMoney(record.paidAmount);
+  const dueDate = record.dueDate || new Date();
+  let status = "Pending";
+  if (due > 0 && paid >= due) status = "Paid";
+  else if (paid > 0) status = "Partial";
+
+  const invoice = await FeeInvoice.create({
+    schoolId,
+    invoiceNumber: await getNextInvoiceNumber(schoolId),
+    studentId: record.studentId,
+    feeTypeId: feeType._id,
+    baseAmount: due,
+    discountPercent: 0,
+    discountAmount: 0,
+    amount: due,
+    paid,
+    status,
+    dueDate,
+    paidDate: due > 0 && paid >= due ? new Date() : null,
+    period: record.session || "",
+    remarks: record.remarks || `Past dues — ${record.session || ""}`.trim(),
+    isLegacyDue: true,
+    pastFeeRecordId: record._id,
+  });
+
+  record.invoiceId = invoice._id;
+  await record.save();
+
+  await writeFeeAudit({
+    schoolId,
+    sourceType: "FeeInvoice",
+    sourceId: invoice._id,
+    action: "created",
+    after: invoice.toObject(),
+    user,
+  });
+
+  return invoice;
+}
+
+/** Prepare WhatsApp message for past-fee due balance (student or parents). */
+export const preparePastFeeWhatsApp = async (req, res, next) => {
+  try {
+    const schoolId = req.schoolId;
+    if (!schoolId) return fail(res, 400, "School context missing");
+
+    const record = await PastFeeRecord.findOne({
+      _id: req.params.id,
+      schoolId,
+      isDeleted: { $ne: true },
+    });
+    if (!record) return fail(res, 404, "Past fee record not found");
+
+    const student = await Student.findOne({ _id: record.studentId, schoolId })
+      .select("name admissionNumber className section phone parents")
+      .lean();
+    if (!student) return fail(res, 404, "Student not found");
+
+    const resolved = resolveWhatsAppRecipient(student, req.body?.recipient);
+    if (!resolved.phone) {
+      return fail(res, 400, resolved.error || "No valid WhatsApp phone found");
+    }
+
+    const school = await School.findById(schoolId).select("name").lean();
+    const schoolName = school?.name || "School";
+    const classSection =
+      [record.className || student.className, record.section || student.section]
+        .filter(Boolean)
+        .join("-") || "—";
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const status =
+      Number(record.balance) <= 0
+        ? "Paid"
+        : Number(record.paidAmount) > 0
+          ? "Partial"
+          : record.dueDate && new Date(record.dueDate) < todayStart
+            ? "Overdue"
+            : "Due";
+
+    const greeting =
+      resolved.recipient === "student"
+        ? `Dear ${student.name || record.studentName || "Student"},`
+        : "Dear Parent/Guardian,";
+
+    const message = [
+      `*Past Fee Dues — ${schoolName}*`,
+      "",
+      greeting,
+      "",
+      resolved.recipient === "student"
+        ? "Please find your pending past fee details below."
+        : `Please find the pending past fee details for *${student.name || record.studentName || "Student"}*.`,
+      "",
+      `*Admission No:* ${record.admissionNumber || student.admissionNumber || "—"}`,
+      `*Class:* ${classSection}`,
+      `*Session:* ${record.session || "—"}`,
+      `*Due Amount:* ${formatInrPlain(record.dueAmount)}`,
+      `*Paid:* ${formatInrPlain(record.paidAmount)}`,
+      `*Balance Due:* ${formatInrPlain(record.balance)}`,
+      `*Status:* ${status}`,
+      `*Due Date:* ${formatDueDateLong(record.dueDate)}`,
+      record.remarks ? `*Remarks:* ${record.remarks}` : null,
+      "",
+      "Kindly clear the outstanding balance at the earliest.",
+      "",
+      "Thank you.",
+    ]
+      .filter((line) => line !== null)
+      .join("\n");
+
+    const waUrl = `https://web.whatsapp.com/send?phone=${resolved.phone}&text=${encodeURIComponent(message)}`;
+
+    return ok(res, {
+      message: "WhatsApp share prepared",
+      data: {
+        phone: resolved.phone,
+        message,
+        studentName: student.name || record.studentName,
+        recipient: resolved.recipient,
+        recipientUsed: resolved.used,
+        waUrl,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** Record a payment on a past-fee row and create/update the linked fee invoice. */
+export const recordPastFeePayment = async (req, res, next) => {
+  try {
+    const schoolId = req.schoolId;
+    if (!schoolId) return fail(res, 400, "School context missing");
+
+    const record = await PastFeeRecord.findOne({
+      _id: req.params.id,
+      schoolId,
+      isDeleted: { $ne: true },
+    });
+    if (!record) return fail(res, 404, "Past fee record not found");
+
+    const { amount, method, receiptNumber, chequeNumber, bankRef, paymentDate, remarks } =
+      req.body || {};
+    if (amount == null || !method) {
+      return fail(res, 400, "amount and method are required");
+    }
+    const validMethods = ["Cash", "Cheque", "Bank Transfer", "UPI"];
+    if (!validMethods.includes(method)) {
+      return fail(res, 400, "method must be one of: " + validMethods.join(", "));
+    }
+    const payAmount = roundMoney(amount);
+    if (payAmount <= 0) return fail(res, 400, "Amount must be greater than 0");
+
+    const balance = roundMoney(record.balance);
+    if (balance <= 0) return fail(res, 400, "This past fee record is already fully paid");
+    if (payAmount > balance) {
+      return fail(res, 400, `Amount exceeds balance of ₹${balance}`);
+    }
+
+    const before = record.toObject();
+    const invoice = await ensurePastFeeInvoice(record, schoolId, req.user);
+
+    const invoiceBalance = roundMoney((invoice.amount || 0) - (invoice.paid || 0));
+    if (payAmount > invoiceBalance && invoiceBalance >= 0) {
+      // Keep invoice in sync if past-fee balance is the source of truth
+      invoice.amount = roundMoney(record.dueAmount);
+      invoice.baseAmount = roundMoney(record.dueAmount);
+      invoice.paid = roundMoney(record.paidAmount);
+    }
+
+    const date = paymentDate ? new Date(paymentDate) : new Date();
+    const payment = await Payment.create({
+      schoolId,
+      invoiceId: invoice._id,
+      studentId: record.studentId,
+      amount: payAmount,
+      method,
+      receiptNumber: receiptNumber ? String(receiptNumber).trim() : "",
+      chequeNumber: chequeNumber ? String(chequeNumber).trim() : "",
+      bankRef: bankRef ? String(bankRef).trim() : "",
+      paymentDate: date,
+      receivedBy: req.user._id,
+      remarks: remarks ? String(remarks).trim() : "",
+    });
+
+    invoice.paid = roundMoney((Number(invoice.paid) || 0) + payAmount);
+    const payable = roundMoney(invoice.amount);
+    const paidTotal = roundMoney(invoice.paid);
+    if (payable > 0 && paidTotal >= payable) {
+      invoice.status = "Paid";
+      invoice.paidDate = new Date();
+    } else if (payable > 0 && paidTotal > 0) {
+      invoice.status = "Partial";
+    }
+    await invoice.save();
+
+    record.paidAmount = roundMoney((Number(record.paidAmount) || 0) + payAmount);
+    record.balance = Math.max(0, roundMoney(record.dueAmount) - record.paidAmount);
+    record.invoiceId = invoice._id;
+    await record.save();
+
+    await writeFeeAudit({
+      schoolId,
+      sourceType: "PastFeeRecord",
+      sourceId: record._id,
+      action: "updated",
+      before,
+      after: record.toObject(),
+      changes: diffTrackedFields(before, record.toObject(), TRACKED_PAST_FEE_FIELDS),
+      user: req.user,
+    });
+
+    const invPopulated = await FeeInvoice.findById(invoice._id)
+      .populate("studentId", "name admissionNumber className section rollNumber")
+      .populate("feeTypeId", "name code");
+
+    return res.status(201).json({
+      success: true,
+      message: "Payment recorded and fee invoice updated",
+      data: {
+        record: serializePastFee(record),
+        invoice: invPopulated,
+        payment: await Payment.findById(payment._id).populate("receivedBy", "name"),
+      },
+    });
   } catch (err) {
     next(err);
   }

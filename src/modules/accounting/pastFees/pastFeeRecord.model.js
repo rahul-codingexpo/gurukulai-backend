@@ -40,6 +40,14 @@ const pastFeeRecordSchema = new Schema(
       index: true,
     },
 
+    /** Linked fee invoice created when a payment is recorded from Past Fee Data. */
+    invoiceId: {
+      type: Schema.Types.ObjectId,
+      ref: "FeeInvoice",
+      default: null,
+      index: true,
+    },
+
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",

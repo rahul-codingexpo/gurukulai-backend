@@ -1,18 +1,11 @@
 import PDFDocument from "pdfkit";
-import fs from "fs";
-import path from "path";
 import { uploadBufferToSpaces } from "../utils/spacesUploadBuffer.util.js";
+import FeeType from "../modules/accounting/feeType.model.js";
+import ClassModel from "../modules/academic/class.model.js";
+import { normalizeClassKey } from "../utils/normalizeClassKey.util.js";
 
-const BLUE = "#2563EB";
-const SLATE = "#0f172a";
-const MUTED = "#64748B";
-const BORDER = "#E2E8F0";
-
-const formatInr = (n) =>
-  `Rs. ${Number(n ?? 0).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+const RED = "#b91c1c";
+const CREAM = "#fffdf5";
 
 const fmtReceiptDate = (d) => {
   if (!d) return "—";
@@ -77,52 +70,115 @@ const rupeesToWords = (num) => {
   return `${parts.join(" ").replace(/\s+/g, " ").trim()} Rupees Only`;
 };
 
-const getActualAmount = (inv) => {
-  if (inv?.baseAmount != null && Number.isFinite(Number(inv.baseAmount))) return Number(inv.baseAmount);
-  return Number(inv?.amount || 0);
+const splitRsPaise = (n) => {
+  const totalPaise = Math.round((Number(n) || 0) * 100);
+  const rs = Math.floor(totalPaise / 100);
+  const paise = Math.abs(totalPaise % 100);
+  return {
+    rs: rs.toLocaleString("en-IN"),
+    p: String(paise).padStart(2, "0"),
+    hasAmount: totalPaise !== 0,
+  };
 };
 
-const getDiscountRupees = (inv) => {
-  const actual = getActualAmount(inv);
-  const net = Number(inv?.amount || 0);
-  if (inv?.discountAmount != null && Number(inv.discountAmount) > 0) return Number(inv.discountAmount);
-  return Math.max(0, actual - net);
+const feeTypeIdOf = (row) => {
+  const ft = row?.feeTypeId;
+  if (ft && typeof ft === "object") return String(ft._id || ft.id || "");
+  return String(ft || "");
 };
 
-const resolveLocalUploadPath = (value) => {
-  if (!value) return null;
-  let rel = String(value).trim();
-  if (/^https?:\/\//i.test(rel)) {
-    try {
-      rel = new URL(rel).pathname;
-    } catch {
-      return null;
+const feeTypeNameOf = (row) => {
+  const ft = row?.feeTypeId;
+  if (ft && typeof ft === "object" && ft.name) return String(ft.name).trim();
+  return String(row?.remarks || "Fee").trim() || "Fee";
+};
+
+const feeTypeAppliesToClass = (ft, className, classDocs = []) => {
+  const classes = Array.isArray(ft?.classIds) ? ft.classIds : [];
+  if (!classes.length) return true;
+  const studentClassName = String(className || "").trim();
+  const studentClassKey = normalizeClassKey(studentClassName);
+  const classById = new Map(
+    (Array.isArray(classDocs) ? classDocs : [])
+      .filter(Boolean)
+      .map((c) => [String(c._id || c.id || ""), String(c.name || "").trim()]),
+  );
+
+  return classes.some((c) => {
+    if (c == null) return false;
+    const id = typeof c === "object" ? String(c._id || c.id || "").trim() : String(c || "").trim();
+    const name =
+      typeof c === "object" ? String(c.name || "").trim() : classById.get(id) || "";
+    const feeClassName = name || classById.get(id) || "";
+    if (feeClassName && studentClassName && feeClassName.toLowerCase() === studentClassName.toLowerCase()) {
+      return true;
     }
+    const feeKey = normalizeClassKey(feeClassName);
+    return Boolean(feeKey && studentClassKey && feeKey === studentClassKey);
+  });
+};
+
+const buildParticularsRows = (invoices = [], classFeeTypes = []) => {
+  const amountById = new Map();
+  invoices.forEach((row) => {
+    const id = feeTypeIdOf(row);
+    if (!id) return;
+    amountById.set(id, (amountById.get(id) || 0) + Number(row.amount || 0));
+  });
+
+  const usedIds = new Set();
+  const rows = [];
+
+  (classFeeTypes || []).forEach((ft) => {
+    const id = String(ft?._id || ft?.id || "");
+    if (!id) return;
+    usedIds.add(id);
+    const billed = amountById.has(id);
+    const amount = billed ? amountById.get(id) : 0;
+    rows.push({
+      label: String(ft.name || "Fee").trim() || "Fee",
+      amount,
+      showAmount: billed,
+    });
+  });
+
+  invoices.forEach((row) => {
+    const id = feeTypeIdOf(row);
+    if (id && usedIds.has(id)) return;
+    if (id) {
+      usedIds.add(id);
+      rows.push({
+        label: feeTypeNameOf(row),
+        amount: amountById.get(id) || Number(row.amount || 0),
+        showAmount: true,
+      });
+      return;
+    }
+    rows.push({
+      label: feeTypeNameOf(row),
+      amount: Number(row.amount || 0),
+      showAmount: Number(row.amount || 0) !== 0,
+    });
+  });
+
+  if (!rows.length) {
+    return [{ sno: 1, label: "Fee", amount: 0, showAmount: false }];
   }
-  rel = rel.replace(/^\/+/, "");
-  if (!rel.startsWith("uploads/")) return null;
-  const abs = path.resolve(process.cwd(), rel);
-  const root = path.resolve(process.cwd(), "uploads");
-  if (!abs.startsWith(root)) return null;
-  return abs;
+
+  return rows.map((row, idx) => ({ sno: idx + 1, ...row }));
 };
 
-const drawHLine = (doc, x1, x2, y, color = BORDER, width = 0.8) => {
-  doc.save();
-  doc.strokeColor(color).lineWidth(width).moveTo(x1, y).lineTo(x2, y).stroke();
-  doc.restore();
-};
-
-const drawDottedHLine = (doc, x1, x2, y) => {
-  doc.save();
-  doc.strokeColor("#CBD5E1").lineWidth(0.7).dash(2, { space: 2 }).moveTo(x1, y).lineTo(x2, y).stroke();
-  doc.undash();
-  doc.restore();
+const resolveClassFeeTypes = async (schoolId, className) => {
+  if (!schoolId) return [];
+  const [feeTypes, classDocs] = await Promise.all([
+    FeeType.find({ schoolId, status: "Active" }).sort({ name: 1 }).lean(),
+    ClassModel.find({ schoolId }).select("_id name").lean(),
+  ]);
+  return (feeTypes || []).filter((ft) => feeTypeAppliesToClass(ft, className, classDocs));
 };
 
 /**
- * Fee receipt PDF matching the Print Invoice UI (FEE RECEIPT layout).
- * Pass `invoices` for a multi-line / complete receipt; defaults to `[invoice]`.
+ * Classic paper-style fee receipt PDF (red + cream, U-DISE header, particulars table).
  */
 export async function buildInvoicePdfBuffer({
   invoice,
@@ -137,36 +193,44 @@ export async function buildInvoicePdfBuffer({
   const stu = student || {};
   const sch = school || {};
 
-  const schoolAddress = [sch.address, sch.city, sch.state, sch.pincode].filter(Boolean).join(", ");
-  const classSection = [stu.className, stu.section].filter(Boolean).join(" - ") || "—";
-  const sessionLabel =
-    stu.academicSession || stu.currentSessionName || stu.session || primary.period || "—";
-  const receiptDate = fmtReceiptDate(primary.createdAt || primary.updatedAt);
-  const fatherMobile = stu.parents?.father?.phone || "—";
-  const fatherName = stu.parents?.father?.name || "—";
+  const schoolAddress = [sch.address, sch.city, sch.state, sch.pincode]
+    .filter(Boolean)
+    .join(", ")
+    .toUpperCase();
+  const classLabel = [stu.className, stu.section].filter(Boolean).join(" - ") || "";
+  const monthLabel = primary.period || "";
+  const receiptDate = fmtReceiptDate(primary.createdAt || primary.updatedAt || primary.dueDate);
+  const fatherName = stu.parents?.father?.name || "";
+  const udise = sch.udiseNumber || sch.registrationNumber || sch.schoolCode || "—";
+  const mobiles = String(sch.phone || "")
+    .split(/[,/|]/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join(", ");
+  const recognition = sch.runUnder || (sch.affiliation ? `Affiliated to ${sch.affiliation}` : "");
+  const serialNo = String(primary.invoiceNumber || "").replace(/^INV-/i, "") || "—";
 
-  const feeRows = lines.map((row, idx) => {
-    const ft = typeof row.feeTypeId === "object" && row.feeTypeId ? row.feeTypeId : feeType || {};
-    const description = [ft?.name || "Fee", row.period].filter(Boolean).join(" — ") || "—";
-    return {
-      sno: idx + 1,
-      description,
-      actual: getActualAmount(row),
-      discount: getDiscountRupees(row),
-      net: Number(row.amount || 0),
-    };
-  });
-
-  const totals = feeRows.reduce(
-    (acc, row) => ({
-      subTotal: acc.subTotal + row.actual,
-      totalDiscount: acc.totalDiscount + row.discount,
-      grandTotal: acc.grandTotal + row.net,
-    }),
-    { subTotal: 0, totalDiscount: 0, grandTotal: 0 },
+  const normalizedLines = lines.map((row) => ({
+    ...row,
+    feeTypeId:
+      typeof row.feeTypeId === "object" && row.feeTypeId
+        ? row.feeTypeId
+        : feeType || row.feeTypeId,
+  }));
+  const classFeeTypes = await resolveClassFeeTypes(
+    primary.schoolId || sch._id || sch.id,
+    stu.className,
   );
+  const feeRows = buildParticularsRows(normalizedLines, classFeeTypes);
 
-  const logoPath = resolveLocalUploadPath(sch.logo);
+  const totals = lines.reduce(
+    (acc, row) => ({
+      total: acc.total + Number(row.amount || 0),
+      paid: acc.paid + Number(row.paid || 0),
+      dues: acc.dues + Math.max(0, Number(row.amount || 0) - Number(row.paid || 0)),
+    }),
+    { total: 0, paid: 0, dues: 0 },
+  );
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -187,269 +251,188 @@ export async function buildInvoicePdfBuffer({
     const contentWidth = pageRight - pageLeft;
     let y = doc.page.margins.top;
 
-    // Outer blue border
-    const boxTop = y - 8;
-    const boxLeft = pageLeft - 10;
-    const boxRight = pageRight + 10;
-    const boxWidth = boxRight - boxLeft;
+    const boxTop = y - 10;
+    const boxLeft = pageLeft - 12;
+    const boxWidth = contentWidth + 24;
 
-    // Header
-    const headerTop = y;
-    if (logoPath && fs.existsSync(logoPath)) {
-      try {
-        doc.image(logoPath, pageLeft, headerTop, { fit: [48, 48] });
-      } catch {
-        // ignore bad logo
-      }
-    }
+    doc.save();
+    doc.rect(boxLeft, boxTop, boxWidth, doc.page.height - boxTop - 24).fill(CREAM);
+    doc.restore();
 
-    const textLeft = logoPath && fs.existsSync(logoPath) ? pageLeft + 60 : pageLeft;
-    doc
-      .fillColor(BLUE)
-      .font("Helvetica-Bold")
-      .fontSize(16)
-      .text(String(sch.name || "School").toUpperCase(), textLeft, headerTop, {
-        width: contentWidth * 0.58,
-        align: "left",
-      });
-
-    let infoY = headerTop + 22;
-    doc.fillColor(MUTED).font("Helvetica").fontSize(9);
-    doc.text(schoolAddress || "—", textLeft, infoY, { width: contentWidth * 0.58 });
-    infoY = doc.y + 2;
-    doc.text(`Contact: ${sch.phone || "—"} | Email: ${sch.email || "—"}`, textLeft, infoY, {
-      width: contentWidth * 0.58,
+    doc.fillColor(RED).font("Times-Bold").fontSize(10);
+    doc.text(`U-DISE CODE-${udise}`, pageLeft, y, { width: contentWidth * 0.34, align: "left" });
+    doc.fontSize(13).text("FEE RECEIPT", pageLeft + contentWidth * 0.28, y, {
+      width: contentWidth * 0.44,
+      align: "center",
     });
-    infoY = doc.y + 2;
-    doc.text(
-      `Affiliation No: ${sch.affiliation || "—"} | Code: ${sch.schoolCode || "—"}`,
-      textLeft,
-      infoY,
-      { width: contentWidth * 0.58 },
-    );
-
-    const metaLeft = pageLeft + contentWidth * 0.62;
-    doc
-      .fillColor("#334155")
-      .font("Helvetica-Bold")
-      .fontSize(11)
-      .text("FEE RECEIPT", metaLeft, headerTop, { width: contentWidth * 0.38, align: "right" });
-    doc
-      .fillColor("#475569")
-      .font("Helvetica")
-      .fontSize(9)
-      .text(`Inv No: ${primary.invoiceNumber || "—"}`, metaLeft, headerTop + 18, {
-        width: contentWidth * 0.38,
-        align: "right",
-      });
-    doc.text(`Date: ${receiptDate}`, metaLeft, headerTop + 32, {
+    doc.fontSize(10).text(`Mob-${mobiles || "—"}`, pageLeft + contentWidth * 0.62, y, {
       width: contentWidth * 0.38,
       align: "right",
     });
 
-    y = Math.max(doc.y, headerTop + 56) + 10;
-    doc.save();
-    doc.rect(pageLeft, y, contentWidth, 3).fill(BLUE);
-    doc.restore();
-    y += 14;
-
-    // Student details (2-column)
-    const col1Label = pageLeft;
-    const col1Value = pageLeft + contentWidth * 0.22;
-    const col2Label = pageLeft + contentWidth * 0.52;
-    const col2Value = pageLeft + contentWidth * 0.74;
-    const rowH = 18;
-
-    const detailRows = [
-      ["Student Name:", stu.name || "—", "Roll No:", stu.rollNumber ?? "—"],
-      ["Father's Name:", fatherName, "Admission No:", stu.admissionNumber || "—"],
-      ["Class/Section:", classSection, "Session:", sessionLabel],
-      ["Father Mobile:", fatherMobile, "", ""],
-    ];
-
-    detailRows.forEach((row) => {
-      doc.fillColor(SLATE).font("Helvetica-Bold").fontSize(9).text(row[0], col1Label, y, {
-        width: contentWidth * 0.21,
-      });
-      doc.font("Helvetica").text(String(row[1]), col1Value, y, { width: contentWidth * 0.28 });
-      if (row[2]) {
-        doc.font("Helvetica-Bold").text(row[2], col2Label, y, { width: contentWidth * 0.21 });
-        doc.font("Helvetica").text(String(row[3]), col2Value, y, { width: contentWidth * 0.26 });
-      }
-      y += rowH;
-      drawDottedHLine(doc, pageLeft, pageRight, y - 4);
+    y += 22;
+    doc.font("Times-Bold").fontSize(22).text(String(sch.name || "SCHOOL").toUpperCase(), pageLeft, y, {
+      width: contentWidth,
+      align: "center",
     });
-
-    y += 8;
-
-    // Fee table header
-    const cols = [
-      { key: "sno", label: "S.No", width: 40, align: "center" },
-      { key: "description", label: "Description / Head", width: contentWidth - 40 - 95 - 85 - 95, align: "left" },
-      { key: "actual", label: "Actual Amount", width: 95, align: "center" },
-      { key: "discount", label: "Discount", width: 85, align: "center" },
-      { key: "net", label: "Net Amount", width: 95, align: "center" },
-    ];
-
-    const cellPadX = 6;
-    const cellInner = (colWidth) => Math.max(8, colWidth - cellPadX * 2);
-
-    const drawTableHeader = (yy) => {
-      doc.save();
-      doc.rect(pageLeft, yy, contentWidth, 24).fill(BLUE);
-      doc.restore();
-      let x = pageLeft;
-      cols.forEach((c) => {
-        doc
-          .fillColor("#FFFFFF")
-          .font("Helvetica-Bold")
-          .fontSize(8)
-          .text(c.label, x + cellPadX, yy + 8, {
-            width: cellInner(c.width),
-            align: "center",
-          });
-        x += c.width;
+    y = doc.y + 2;
+    if (recognition) {
+      doc.font("Times-Bold").fontSize(11).text(recognition, pageLeft, y, {
+        width: contentWidth,
+        align: "center",
       });
-      return yy + 24;
+      y = doc.y + 1;
+    }
+    if (sch.affiliation && sch.runUnder) {
+      doc.font("Times-Bold").fontSize(10).text(String(sch.affiliation), pageLeft, y, {
+        width: contentWidth,
+        align: "center",
+      });
+      y = doc.y + 4;
+    } else {
+      y += 4;
+    }
+
+    const addr = schoolAddress || "—";
+    const addrHeight = Math.max(22, doc.heightOfString(addr, { width: contentWidth * 0.78 }) + 10);
+    const addrWidth = Math.min(contentWidth * 0.86, Math.max(280, addr.length * 7));
+    const addrX = pageLeft + (contentWidth - addrWidth) / 2;
+    doc.save();
+    doc.strokeColor(RED).lineWidth(1.2).roundedRect(addrX, y, addrWidth, addrHeight, 12).stroke();
+    doc.restore();
+    doc.font("Times-Bold").fontSize(10).fillColor(RED).text(addr, addrX + 8, y + 6, {
+      width: addrWidth - 16,
+      align: "center",
+    });
+    y += addrHeight + 14;
+
+    doc.font("Times-Bold").fontSize(12);
+    doc.text(`Sl.No. ${serialNo}`, pageLeft, y, { width: contentWidth * 0.5, align: "left" });
+    doc.text(`Date: ${receiptDate}`, pageLeft + contentWidth * 0.5, y, {
+      width: contentWidth * 0.5,
+      align: "right",
+    });
+    y += 20;
+
+    doc.font("Times-Bold").fontSize(12).fillColor(RED);
+    doc.text(`Name: ${stu.name || "—"}`, pageLeft, y, { width: contentWidth });
+    y += 18;
+    doc.text(`Father's Name: ${fatherName || "—"}`, pageLeft, y, { width: contentWidth });
+    y += 18;
+
+    const third = contentWidth / 3;
+    doc.text(`Class: ${classLabel}`, pageLeft, y, { width: third - 6 });
+    doc.text(`Roll: ${stu.rollNumber ?? "—"}`, pageLeft + third, y, { width: third - 6 });
+    doc.text(`Month: ${monthLabel}`, pageLeft + third * 2, y, { width: third });
+    y += 22;
+
+    const colSl = 50;
+    const colAmtRs = 90;
+    const colAmtP = 50;
+    const colPart = contentWidth - colSl - colAmtRs - colAmtP;
+    const headerH = 36;
+
+    const drawCell = (x, yy, w, h, text, opts = {}) => {
+      doc.save();
+      doc.strokeColor(RED).lineWidth(1).rect(x, yy, w, h).stroke();
+      doc.restore();
+      if (text == null || text === "") return;
+      doc
+        .fillColor(RED)
+        .font("Times-Bold")
+        .fontSize(opts.size || 11)
+        .text(String(text), x + 4, yy + (opts.padY ?? 8), {
+          width: w - 8,
+          align: opts.align || "left",
+        });
     };
 
-    y = drawTableHeader(y);
+    drawCell(pageLeft, y, colSl, headerH, "Sl No.", { align: "center", padY: 12 });
+    drawCell(pageLeft + colSl, y, colPart, headerH, "PARTICULARS", { align: "center", padY: 12 });
+    drawCell(pageLeft + colSl + colPart, y, colAmtRs + colAmtP, 18, "Amount", { align: "center", padY: 4 });
+    drawCell(pageLeft + colSl + colPart, y + 18, colAmtRs, 18, "RS.", { align: "center", padY: 4, size: 10 });
+    drawCell(pageLeft + colSl + colPart + colAmtRs, y + 18, colAmtP, 18, "P.", { align: "center", padY: 4, size: 10 });
+    y += headerH;
+
+    const available = Math.max(160, doc.page.height - y - 170);
+    const dynamicRowH = Math.min(28, Math.max(20, Math.floor(available / Math.max(feeRows.length, 1))));
+    const padY = dynamicRowH >= 26 ? 8 : 4;
 
     feeRows.forEach((row) => {
-      const values = [
-        String(row.sno),
-        row.description,
-        formatInr(row.actual),
-        formatInr(row.discount),
-        formatInr(row.net),
-      ];
-      const heights = values.map((val, i) =>
-        doc.heightOfString(String(val), {
-          width: cellInner(cols[i].width),
-          align: cols[i].align,
-        }),
-      );
-      const cellH = Math.max(24, Math.max(...heights) + 12);
-
-      if (y + cellH > doc.page.height - 120) {
-        doc.addPage();
-        y = doc.page.margins.top;
-        y = drawTableHeader(y);
-      }
-
-      let x = pageLeft;
-      cols.forEach((c, i) => {
-        doc.save();
-        doc.strokeColor(BORDER).lineWidth(0.8).rect(x, y, c.width, cellH).stroke();
-        doc.restore();
-        const textHeight = doc.heightOfString(String(values[i]), {
-          width: cellInner(c.width),
-          align: c.align,
-        });
-        const textY = y + Math.max(6, (cellH - textHeight) / 2);
-        doc
-          .fillColor(i === 4 ? SLATE : i === 0 ? MUTED : SLATE)
-          .font(i === 4 ? "Helvetica-Bold" : "Helvetica")
-          .fontSize(9)
-          .text(values[i], x + cellPadX, textY, {
-            width: cellInner(c.width),
-            align: c.align,
-          });
-        x += c.width;
+      const money = splitRsPaise(row.amount);
+      const showAmt = row.showAmount && money.hasAmount;
+      drawCell(pageLeft, y, colSl, dynamicRowH, String(row.sno), { align: "center", padY });
+      drawCell(pageLeft + colSl, y, colPart, dynamicRowH, row.label, { padY });
+      drawCell(pageLeft + colSl + colPart, y, colAmtRs, dynamicRowH, showAmt ? money.rs : "", {
+        align: "right",
+        padY,
       });
-      y += cellH;
+      drawCell(pageLeft + colSl + colPart + colAmtRs, y, colAmtP, dynamicRowH, showAmt ? money.p : "", {
+        align: "center",
+        padY,
+      });
+      y += dynamicRowH;
     });
 
     y += 10;
-
-    // Totals
-    const totalsWidth = 250;
-    const totalsLeft = pageRight - totalsWidth;
-    const labelW = 120;
-    const valueW = 120;
-    doc
-      .fillColor(MUTED)
-      .font("Helvetica-Bold")
-      .fontSize(9)
-      .text("Sub-Total:", totalsLeft, y, { width: labelW, align: "right" });
-    doc
-      .fillColor(SLATE)
-      .font("Helvetica-Bold")
-      .text(formatInr(totals.subTotal), totalsLeft + labelW + 8, y, {
-        width: valueW,
-        align: "center",
-      });
-    y += 16;
-    doc
-      .fillColor(MUTED)
-      .font("Helvetica-Bold")
-      .fontSize(9)
-      .text("Total Discount:", totalsLeft, y, { width: labelW, align: "right" });
-    doc
-      .fillColor(MUTED)
-      .font("Helvetica-Bold")
-      .text(formatInr(totals.totalDiscount), totalsLeft + labelW + 8, y, {
-        width: valueW,
-        align: "center",
-      });
-    y += 18;
-    doc
-      .fillColor(SLATE)
-      .font("Helvetica-Bold")
-      .fontSize(11)
-      .text("Grand Total:", totalsLeft, y, { width: labelW, align: "right" });
-    doc
-      .fillColor(BLUE)
-      .font("Helvetica-Bold")
-      .fontSize(13)
-      .text(formatInr(totals.grandTotal), totalsLeft + labelW + 8, y - 1, {
-        width: valueW,
-        align: "center",
-      });
-    y += 20;
-    doc
-      .fillColor("#94A3B8")
-      .font("Helvetica-Oblique")
-      .fontSize(8)
-      .text(`(In Words: ${rupeesToWords(Math.round(totals.grandTotal))})`, pageLeft, y, {
-        width: contentWidth,
-        align: "right",
-      });
-
-    y += 28;
-
-    // Footer
-    const footerY = Math.max(y, doc.page.height - 90);
-    doc
-      .fillColor("#94A3B8")
-      .font("Helvetica-Oblique")
-      .fontSize(8)
-      .text("Digital Partner: Medhyx Technology | www.medhyxtech.com", pageLeft, footerY, {
-        width: contentWidth * 0.55,
-      });
-
-    doc
-      .fillColor("#475569")
-      .font("Helvetica")
-      .fontSize(9)
-      .text(paymentLine || "—", pageLeft + contentWidth * 0.5, footerY, {
-        width: contentWidth * 0.5,
-        align: "right",
-      });
-    drawHLine(doc, pageLeft + contentWidth * 0.55, pageRight, footerY + 28, "#94A3B8", 0.8);
-    doc
-      .fillColor(MUTED)
-      .font("Helvetica")
-      .fontSize(9)
-      .text("Authorized Signatory", pageLeft + contentWidth * 0.5, footerY + 32, {
-        width: contentWidth * 0.5,
-        align: "right",
-      });
-
-    // Draw outer border last (approximate height)
-    const boxBottom = Math.min(doc.page.height - 24, footerY + 55);
+    const wordsBoxW = contentWidth - 230;
+    const wordsBoxH = 78;
     doc.save();
-    doc.strokeColor(BLUE).lineWidth(2).rect(boxLeft, boxTop, boxWidth, boxBottom - boxTop).stroke();
+    doc.strokeColor(RED).lineWidth(1).rect(pageLeft, y, wordsBoxW, wordsBoxH).stroke();
+    doc.restore();
+    doc.font("Times-Bold").fontSize(12).fillColor(RED).text("Amount In Words", pageLeft + 8, y + 8, {
+      width: wordsBoxW - 16,
+    });
+    doc.font("Times-Bold").fontSize(11).text(rupeesToWords(Math.round(totals.total)), pageLeft + 8, y + 28, {
+      width: wordsBoxW - 16,
+    });
+
+    const sumX = pageLeft + wordsBoxW + 8;
+    const sumW = contentWidth - wordsBoxW - 8;
+    const sumLabelW = sumW - 90 - 42;
+    const summaryRows = [
+      ["Total-", totals.total],
+      ["Paid-", totals.paid],
+      ["Dues-", totals.dues],
+    ];
+    summaryRows.forEach((row, i) => {
+      const yy = y + i * 26;
+      const money = splitRsPaise(row[1]);
+      drawCell(sumX, yy, sumLabelW, 26, row[0], { padY: 7 });
+      drawCell(sumX + sumLabelW, yy, 90, 26, money.rs, { align: "right", padY: 7 });
+      drawCell(sumX + sumLabelW + 90, yy, 42, 26, money.p, { align: "center", padY: 7 });
+    });
+
+    y += Math.max(wordsBoxH, 78) + 16;
+
+    doc.font("Times-Bold").fontSize(10).fillColor(RED).text(
+      "Note:- Parents/Guardians are requested to Pay the monthly fee up to 5 of each month.",
+      pageLeft,
+      y,
+      { width: contentWidth * 0.68 },
+    );
+    if (paymentLine && paymentLine !== "—") {
+      doc.font("Times-Roman").fontSize(9).text(paymentLine, pageLeft, doc.y + 4, {
+        width: contentWidth * 0.68,
+      });
+    }
+
+    doc.font("Times-Bold").fontSize(12).text("Signature", pageLeft + contentWidth * 0.72, y + 18, {
+      width: contentWidth * 0.28,
+      align: "right",
+    });
+    doc.save();
+    doc
+      .strokeColor(RED)
+      .lineWidth(1)
+      .moveTo(pageLeft + contentWidth * 0.72, y + 16)
+      .lineTo(pageRight, y + 16)
+      .stroke();
+    doc.restore();
+
+    const boxBottom = Math.min(doc.page.height - 24, y + 70);
+    doc.save();
+    doc.strokeColor(RED).lineWidth(1.6).rect(boxLeft, boxTop, boxWidth, boxBottom - boxTop).stroke();
     doc.restore();
 
     doc.end();

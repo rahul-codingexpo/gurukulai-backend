@@ -30,7 +30,7 @@ router.post(
 
 /* Get staff */
 
-router.get("/", protect, authorize("Admin", "Principal","SuperAdmin"), getStaff);
+router.get("/", protect, authorize("Admin", "Principal", "Accountant", "SuperAdmin"), getStaff);
 
 /* Update staff */
 
