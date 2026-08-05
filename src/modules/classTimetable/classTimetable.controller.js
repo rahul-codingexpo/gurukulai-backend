@@ -50,11 +50,20 @@ export const createClassTimetable = async (req, res, next) => {
     const subjectIds = normalizeSubjectIdsFromBody(req.body);
     const subjectId = subjectIds[0];
 
-    if (!classId || !sectionId || !subjectId || !startTime || !endTime || !day || !teacherId) {
+    const missing = [
+      !classId && "class",
+      !sectionId && "section",
+      !subjectId && "subject",
+      !startTime && "start time",
+      !endTime && "end time",
+      !day && "day",
+      !teacherId && "teacher",
+    ].filter(Boolean);
+
+    if (missing.length) {
       return res.status(400).json({
         success: false,
-        message:
-          "classId, sectionId, subjectId/subjectIds, startTime, endTime, day and teacherId are required",
+        message: `Please fill: ${missing.join(", ")}`,
       });
     }
 
@@ -92,7 +101,7 @@ export const createClassTimetable = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid teacherId. Use the teacher's login (User) id, or a Staff id that has a linked user account.",
+          "Invalid teacher. Select a staff member from the list.",
       });
     }
 
@@ -320,7 +329,7 @@ export const updateClassTimetable = async (req, res, next) => {
         return res.status(400).json({
           success: false,
           message:
-            "Invalid teacherId. Use the teacher's login (User) id, or a Staff id that has a linked user account.",
+            "Invalid teacher. Select a staff member from the list.",
         });
       }
       entry.teacherId = resolvedTeacherId;

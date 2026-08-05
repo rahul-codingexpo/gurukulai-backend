@@ -13,12 +13,15 @@ const POPULATE_PATHS = [
 
 /** Accept subjectIds[] or legacy subjectId → unique string ids. */
 export const normalizeSubjectIdsFromBody = (body = {}) => {
-  const raw = Array.isArray(body.subjectIds)
-    ? body.subjectIds
-    : body.subjectId != null && body.subjectId !== ""
-      ? [body.subjectId]
-      : [];
-  return [...new Set(raw.map((id) => String(id || "").trim()).filter(Boolean))];
+  let raw = body.subjectIds;
+  if (raw == null || raw === "") {
+    raw = body.subjectId != null && body.subjectId !== "" ? [body.subjectId] : [];
+  } else if (!Array.isArray(raw)) {
+    raw = typeof raw === "string"
+      ? raw.split(",").map((part) => part.trim()).filter(Boolean)
+      : [raw];
+  }
+  return [...new Set(raw.map((id) => String(id?._id ?? id ?? "").trim()).filter(Boolean))];
 };
 
 /** Display helpers for populated ClassTimetable rows (subjectIds or legacy subjectId). */
@@ -61,6 +64,7 @@ export const resolveTeacherUserId = async (teacherId) => {
 
   const staff = await Staff.findById(oid).select("userId name");
   if (staff?.userId) return staff.userId;
+  if (staff) return staff._id;
 
   return null;
 };
