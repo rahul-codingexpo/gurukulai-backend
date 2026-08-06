@@ -27,6 +27,7 @@ import { quizQuestionRoutes } from "../modules/quiz/quizQuestion.routes.js";
 import galleryRoutes from "../modules/gallery/gallery.routes.js";
 import inventoryExpenseRoutes from "../modules/inventory/inventoryExpense.routes.js";
 import payrollRoutes from "../modules/payroll/payroll.routes.js";
+import studentFeeDiscountRoutes from "../modules/accounting/studentFeeDiscount.routes.js";
 const router = express.Router();
 
 router.use("/auth", authRoutes);
@@ -55,6 +56,7 @@ router.use("/homework", homeworkRoutes);
 router.use("/promote", promoteRoutes);
 router.use("/live-class", liveClassRoutes);
 router.use(accountingRoutes);
+router.use(studentFeeDiscountRoutes);
 router.use(payrollRoutes);
 router.use("/wallet", walletRoutes);
 router.get("/health", (req, res) => {
