@@ -18,7 +18,7 @@ const upload = createSpacesUpload({
   fileFilter,
 });
 
-// Study materials: documents + images (no per-file size cap in app — use reverse-proxy limits if needed)
+// Study materials / homework: documents + images (no app file-size cap)
 const STUDY_MATERIAL_ALLOWED_EXT = new Set([
   ".pdf",
   ".doc",
@@ -63,6 +63,8 @@ const TEN_MB = 10 * 1024 * 1024;
 export const uploadStudyMaterials = createSpacesUpload({
   folder: "uploads/study-materials",
   fileFilter: studyMaterialFileFilter,
+  // No fileSize limit — small and large files both allowed (Nginx must also allow large bodies).
+  limits: { files: 10 },
 });
 
 // Bulk student import: allow Excel + CSV files

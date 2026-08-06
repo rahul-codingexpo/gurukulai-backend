@@ -638,39 +638,42 @@ export const prepareManualWhatsApp = async (req, res, next) => {
       .lean();
     const schoolName = school?.name || "School";
 
+    const hasNormal = invoices.some((inv) => !inv.isLegacyDue);
+    const pdfInvoices = hasNormal ? invoices.filter((inv) => !inv.isLegacyDue) : invoices;
+
     const pdfUrl = await ensureInvoicePdf(
-      invoices[0],
+      pdfInvoices[0],
       student,
-      invoices[0].feeTypeId,
+      pdfInvoices[0].feeTypeId,
       school,
-      invoices,
+      pdfInvoices,
     );
     const pdfs = [
       {
-        invoiceId: String(invoices[0]._id),
-        invoiceNumber: invoices[0].invoiceNumber,
+        invoiceId: String(pdfInvoices[0]._id),
+        invoiceNumber: pdfInvoices[0].invoiceNumber,
         pdfUrl,
         pdfAbsoluteUrl: toAbsolutePdfUrl(req, pdfUrl),
       },
     ];
 
-    const totalBase = invoices.reduce(
+    const totalBase = pdfInvoices.reduce(
       (s, inv) => s + Number(inv.baseAmount != null ? inv.baseAmount : inv.amount || 0),
       0,
     );
-    const totalAmount = invoices.reduce((s, inv) => s + Number(inv.amount || 0), 0);
-    const totalPaid = invoices.reduce((s, inv) => s + Number(inv.paid || 0), 0);
+    const totalAmount = pdfInvoices.reduce((s, inv) => s + Number(inv.amount || 0), 0);
+    const totalPaid = pdfInvoices.reduce((s, inv) => s + Number(inv.paid || 0), 0);
     const totalBalance = Math.round((totalAmount - totalPaid) * 100) / 100;
-    const feeTypes = invoices
+    const feeTypes = pdfInvoices
       .map((inv) => (typeof inv.feeTypeId === "object" ? inv.feeTypeId?.name : ""))
       .filter(Boolean)
       .join(", ");
-    const invoiceNumbers = invoices.map((inv) => inv.invoiceNumber).join(", ");
-    const period = String(invoices[0].period || "").trim() || "—";
+    const invoiceNumbers = pdfInvoices.map((inv) => inv.invoiceNumber).join(", ");
+    const period = String(pdfInvoices[0].period || "").trim() || "—";
     const classSection = [student.className, student.section].filter(Boolean).join(" - ") || "—";
     const discountLabels = [
       ...new Set(
-        invoices
+        pdfInvoices
           .map((inv) => {
             const pct = Number(inv.discountPercent) || 0;
             return pct > 0 ? `${pct}%` : null;
@@ -679,15 +682,15 @@ export const prepareManualWhatsApp = async (req, res, next) => {
       ),
     ];
     const status =
-      invoices.every((i) => i.status === "Paid")
+      pdfInvoices.every((i) => i.status === "Paid")
         ? "Paid"
-        : invoices.some((i) => i.status === "Partial")
+        : pdfInvoices.some((i) => i.status === "Partial")
           ? "Partial"
-          : invoices.some((i) => i.status === "Overdue")
+          : pdfInvoices.some((i) => i.status === "Overdue")
             ? "Overdue"
-            : invoices.some((i) => i.status === "Pending")
+            : pdfInvoices.some((i) => i.status === "Pending")
               ? "Due"
-              : invoices[0].status || "Due";
+              : pdfInvoices[0].status || "Due";
 
     const pdfLines = pdfs
       .map((p) => {
@@ -723,7 +726,7 @@ export const prepareManualWhatsApp = async (req, res, next) => {
       `*Paid:* ${formatInrPlain(totalPaid)}`,
       `*Balance:* ${formatInrPlain(totalBalance)}`,
       `*Status:* ${status}`,
-      `*Due Date:* ${formatDueDateLong(invoices[0].dueDate)}`,
+      `*Due Date:* ${formatDueDateLong(pdfInvoices[0].dueDate)}`,
       "",
       "*Invoice PDF:*",
       ...(pdfLines.length ? pdfLines : ["PDF link unavailable"]),
@@ -772,22 +775,9 @@ export const downloadInvoicePdf = async (req, res, next) => {
       .select("name logo address city state pincode phone email affiliation schoolCode")
       .lean();
 
-    // Always rebuild so PDF matches the current fee-receipt print layout.
-    const siblingInvoices = await FeeInvoice.find({
-      schoolId: req.schoolId,
-      studentId: invoice.studentId?._id || invoice.studentId,
-      period: invoice.period || "",
-      isDeleted: { $ne: true },
-      status: { $ne: "Cancelled" },
-    })
-      .populate("feeTypeId", "name code")
-      .sort({ createdAt: 1 })
-      .lean();
-
-    const lines =
-      siblingInvoices.length > 0
-        ? siblingInvoices
-        : [{ ...invoice, feeTypeId: invoice.feeTypeId }];
+    // Rebuild PDF for the selected invoice line(s) only — same as print.
+    // Do not pull every sibling fee for the same period (that added Past Dues / other fees).
+    const lines = [{ ...invoice, feeTypeId: invoice.feeTypeId }];
 
     const buffer = await buildInvoicePdfBuffer({
       invoice,
@@ -806,7 +796,7 @@ export const downloadInvoicePdf = async (req, res, next) => {
         school,
       });
       await FeeInvoice.updateMany(
-        { _id: { $in: lines.map((r) => r._id) } },
+        { _id: invoice._id },
         { $set: { pdfUrl } },
       );
     } catch {

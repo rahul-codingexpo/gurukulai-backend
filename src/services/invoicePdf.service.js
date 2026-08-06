@@ -1,8 +1,5 @@
 import PDFDocument from "pdfkit";
 import { uploadBufferToSpaces } from "../utils/spacesUploadBuffer.util.js";
-import FeeType from "../modules/accounting/feeType.model.js";
-import ClassModel from "../modules/academic/class.model.js";
-import { normalizeClassKey } from "../utils/normalizeClassKey.util.js";
 
 const RED = "#b91c1c";
 const CREAM = "#fffdf5";
@@ -93,88 +90,41 @@ const feeTypeNameOf = (row) => {
   return String(row?.remarks || "Fee").trim() || "Fee";
 };
 
-const feeTypeAppliesToClass = (ft, className, classDocs = []) => {
-  const classes = Array.isArray(ft?.classIds) ? ft.classIds : [];
-  if (!classes.length) return true;
-  const studentClassName = String(className || "").trim();
-  const studentClassKey = normalizeClassKey(studentClassName);
-  const classById = new Map(
-    (Array.isArray(classDocs) ? classDocs : [])
-      .filter(Boolean)
-      .map((c) => [String(c._id || c.id || ""), String(c.name || "").trim()]),
-  );
-
-  return classes.some((c) => {
-    if (c == null) return false;
-    const id = typeof c === "object" ? String(c._id || c.id || "").trim() : String(c || "").trim();
-    const name =
-      typeof c === "object" ? String(c.name || "").trim() : classById.get(id) || "";
-    const feeClassName = name || classById.get(id) || "";
-    if (feeClassName && studentClassName && feeClassName.toLowerCase() === studentClassName.toLowerCase()) {
-      return true;
-    }
-    const feeKey = normalizeClassKey(feeClassName);
-    return Boolean(feeKey && studentClassKey && feeKey === studentClassKey);
-  });
-};
-
-const buildParticularsRows = (invoices = [], classFeeTypes = []) => {
+/** Particulars = only fee lines on this invoice (not every class fee type). */
+const buildParticularsRows = (invoices = []) => {
   const amountById = new Map();
-  invoices.forEach((row) => {
-    const id = feeTypeIdOf(row);
-    if (!id) return;
-    amountById.set(id, (amountById.get(id) || 0) + Number(row.amount || 0));
-  });
-
-  const usedIds = new Set();
-  const rows = [];
-
-  (classFeeTypes || []).forEach((ft) => {
-    const id = String(ft?._id || ft?.id || "");
-    if (!id) return;
-    usedIds.add(id);
-    const billed = amountById.has(id);
-    const amount = billed ? amountById.get(id) : 0;
-    rows.push({
-      label: String(ft.name || "Fee").trim() || "Fee",
-      amount,
-      showAmount: billed,
-    });
-  });
+  const labelById = new Map();
+  const order = [];
 
   invoices.forEach((row) => {
     const id = feeTypeIdOf(row);
-    if (id && usedIds.has(id)) return;
+    const label = feeTypeNameOf(row);
+    const amount = Number(row.amount || 0);
     if (id) {
-      usedIds.add(id);
-      rows.push({
-        label: feeTypeNameOf(row),
-        amount: amountById.get(id) || Number(row.amount || 0),
-        showAmount: true,
-      });
+      if (!amountById.has(id)) {
+        order.push(id);
+        labelById.set(id, label);
+        amountById.set(id, 0);
+      }
+      amountById.set(id, amountById.get(id) + amount);
       return;
     }
-    rows.push({
-      label: feeTypeNameOf(row),
-      amount: Number(row.amount || 0),
-      showAmount: Number(row.amount || 0) !== 0,
-    });
+    const key = `__row_${order.length}`;
+    order.push(key);
+    labelById.set(key, label);
+    amountById.set(key, amount);
   });
 
+  const rows = order.map((key) => ({
+    label: labelById.get(key) || "Fee",
+    amount: amountById.get(key) || 0,
+  }));
+
   if (!rows.length) {
-    return [{ sno: 1, label: "Fee", amount: 0, showAmount: false }];
+    return [{ sno: 1, label: "Fee", amount: 0 }];
   }
 
   return rows.map((row, idx) => ({ sno: idx + 1, ...row }));
-};
-
-const resolveClassFeeTypes = async (schoolId, className) => {
-  if (!schoolId) return [];
-  const [feeTypes, classDocs] = await Promise.all([
-    FeeType.find({ schoolId, status: "Active" }).sort({ name: 1 }).lean(),
-    ClassModel.find({ schoolId }).select("_id name").lean(),
-  ]);
-  return (feeTypes || []).filter((ft) => feeTypeAppliesToClass(ft, className, classDocs));
 };
 
 /**
@@ -217,11 +167,7 @@ export async function buildInvoicePdfBuffer({
         ? row.feeTypeId
         : feeType || row.feeTypeId,
   }));
-  const classFeeTypes = await resolveClassFeeTypes(
-    primary.schoolId || sch._id || sch.id,
-    stu.className,
-  );
-  const feeRows = buildParticularsRows(normalizedLines, classFeeTypes);
+  const feeRows = buildParticularsRows(normalizedLines);
 
   const totals = lines.reduce(
     (acc, row) => ({
@@ -360,14 +306,13 @@ export async function buildInvoicePdfBuffer({
 
     feeRows.forEach((row) => {
       const money = splitRsPaise(row.amount);
-      const showAmt = row.showAmount && money.hasAmount;
       drawCell(pageLeft, y, colSl, dynamicRowH, String(row.sno), { align: "center", padY });
       drawCell(pageLeft + colSl, y, colPart, dynamicRowH, row.label, { padY });
-      drawCell(pageLeft + colSl + colPart, y, colAmtRs, dynamicRowH, showAmt ? money.rs : "", {
+      drawCell(pageLeft + colSl + colPart, y, colAmtRs, dynamicRowH, money.rs, {
         align: "right",
         padY,
       });
-      drawCell(pageLeft + colSl + colPart + colAmtRs, y, colAmtP, dynamicRowH, showAmt ? money.p : "", {
+      drawCell(pageLeft + colSl + colPart + colAmtRs, y, colAmtP, dynamicRowH, money.p, {
         align: "center",
         padY,
       });

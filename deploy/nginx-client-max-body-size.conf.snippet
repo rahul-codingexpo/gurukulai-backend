@@ -1,0 +1,8 @@
+# Add inside the server { ... } block that proxies schoolerp.medhyxtech.com
+# (or the location that proxies /api to Node). Then:
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# 0 = unlimited body size (required for large study-material PDFs).
+# Without this, Nginx defaults to ~1MB and returns HTTP 413.
+
+client_max_body_size 0;

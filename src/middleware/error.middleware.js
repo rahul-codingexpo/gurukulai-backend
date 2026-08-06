@@ -13,7 +13,13 @@ export const errorHandler = (err, req, res, next) => {
 
   if (err.code === "LIMIT_FILE_SIZE") {
     statusCode = 413;
-    message = "Uploaded file exceeds the allowed size limit";
+    message =
+      "Uploaded file exceeds the allowed size limit. On the live server, set Nginx client_max_body_size 0; (unlimited) and reload Nginx.";
+  } else if (err.statusCode === 413 || err.status === 413) {
+    statusCode = 413;
+    message =
+      err.message ||
+      "Upload rejected: file too large for the reverse proxy (HTTP 413). Set Nginx client_max_body_size 0; and reload Nginx.";
   } else if (err.code === "LIMIT_FILE_COUNT") {
     statusCode = 400;
     message = "Too many files in one upload (maximum 10)";
