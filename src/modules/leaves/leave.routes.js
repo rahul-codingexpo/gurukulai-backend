@@ -95,7 +95,7 @@ router.put(
 router.put(
   "/staff/:id/status",
   protect,
-  authorize("Admin", "Principal", "Teacher"),
+  authorize("Admin", "Principal"),
   updateStaffLeaveStatus
 );
 

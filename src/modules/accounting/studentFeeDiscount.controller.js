@@ -1,5 +1,6 @@
 import StudentFeeDiscount from "./studentFeeDiscount.model.js";
 import Student from "../student/student.model.js";
+import { schoolIdFilter } from "../../utils/branchScope.util.js";
 
 const roundMoney = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -23,7 +24,7 @@ export const listStudentFeeDiscounts = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const { className, section, search } = req.query;
     const rows = await StudentFeeDiscount.find({
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       discountAmount: { $gt: 0 },
     })
       .populate("studentId", "name admissionNumber className section rollNumber status")
@@ -76,14 +77,14 @@ export const getStudentFeeDiscountsByStudent = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
     const { studentId } = req.params;
-    const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId })
+    const student = await Student.findOne({ _id: studentId, ...schoolIdFilter(req) })
       .select("name admissionNumber className section")
       .lean();
     if (!student) {
       return res.status(404).json({ success: false, message: "Student not found" });
     }
     const rows = await StudentFeeDiscount.find({
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       studentId,
       discountAmount: { $gt: 0 },
     })
@@ -122,11 +123,14 @@ export const upsertStudentFeeDiscounts = async (req, res, next) => {
         message: "studentId and items array are required",
       });
     }
-    const student = await Student.findOne({ _id: studentId, schoolId: req.schoolId }).select("_id");
+    const student = await Student.findOne({ _id: studentId, ...schoolIdFilter(req) }).select(
+      "_id schoolId",
+    );
     if (!student) {
       return res.status(404).json({ success: false, message: "Student not found" });
     }
 
+    const campusSchoolId = student.schoolId;
     const saved = [];
     for (const item of items) {
       const feeTypeId = item?.feeTypeId;
@@ -134,17 +138,17 @@ export const upsertStudentFeeDiscounts = async (req, res, next) => {
       const amount = roundMoney(item.discountAmount);
       if (!Number.isFinite(amount) || amount <= 0) {
         await StudentFeeDiscount.deleteOne({
-          schoolId: req.schoolId,
+          schoolId: campusSchoolId,
           studentId,
           feeTypeId,
         });
         continue;
       }
       const row = await StudentFeeDiscount.findOneAndUpdate(
-        { schoolId: req.schoolId, studentId, feeTypeId },
+        { schoolId: campusSchoolId, studentId, feeTypeId },
         {
           $set: {
-            schoolId: req.schoolId,
+            schoolId: campusSchoolId,
             studentId,
             feeTypeId,
             discountAmount: amount,

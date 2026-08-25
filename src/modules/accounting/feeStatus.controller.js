@@ -1,5 +1,6 @@
 import FeeInvoice from "./feeInvoice.model.js";
 import Student from "../student/student.model.js";
+import { schoolIdMatchValue } from "../../utils/branchScope.util.js";
 
 const ensureSchoolId = (req, res) => {
   if (!req.schoolId) {
@@ -12,7 +13,7 @@ const ensureSchoolId = (req, res) => {
     });
     return null;
   }
-  return req.schoolId;
+  return schoolIdMatchValue(req);
 };
 
 /**

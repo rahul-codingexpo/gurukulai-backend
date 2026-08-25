@@ -74,13 +74,49 @@ export const getSchools = async (req, res, next) => {
   try {
     const isSuperAdmin = req.user?.roleId?.name === "SuperAdmin";
 
-    const filter = isSuperAdmin ? {} : { _id: req.user.schoolId };
+    const homeId = req.user?.schoolId?._id || req.user?.schoolId;
+    const filter = isSuperAdmin
+      ? {}
+      : { _id: homeId };
 
-    const schools = await School.find(filter);
+    const schools = await School.find(filter).populate("branchId", "name status");
 
     res.json({
       success: true,
       data: schools,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Campuses in the caller's branch group (for accounting campus selection).
+ */
+export const getBranchCampuses = async (req, res, next) => {
+  try {
+    const roleName = req.user?.roleId?.name;
+    if (roleName === "SuperAdmin") {
+      return res.json({ success: true, data: [] });
+    }
+
+    const homeId = req.user?.schoolId?._id || req.user?.schoolId;
+    if (!homeId) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const home = await School.findById(homeId).select("branchId").lean();
+    const filter = home?.branchId ? { branchId: home.branchId } : { _id: homeId };
+
+    const campuses = await School.find(filter)
+      .select("name schoolCode address city state pincode status branchId upiId qrCode logo website affiliation registrationNumber yearEstablished feeReceiptSettings idCardSettings marksheetSettings")
+      .populate("branchId", "name")
+      .sort({ name: 1 })
+      .lean();
+
+    res.json({
+      success: true,
+      data: campuses,
     });
   } catch (err) {
     next(err);
@@ -182,6 +218,75 @@ export const updateSchool = async (req, res, next) => {
         }
       }
       update.timetableSettings = merged;
+    }
+
+    // Fee receipt print template settings
+    let parsedFeeReceiptSettings = null;
+    if (update.feeReceiptSettings && typeof update.feeReceiptSettings === "string") {
+      try {
+        parsedFeeReceiptSettings = JSON.parse(update.feeReceiptSettings);
+      } catch (_) {}
+    } else if (update.feeReceiptSettings && typeof update.feeReceiptSettings === "object") {
+      parsedFeeReceiptSettings = update.feeReceiptSettings;
+    } else if (update.feeReceiptSettingsJson) {
+      try {
+        parsedFeeReceiptSettings = JSON.parse(update.feeReceiptSettingsJson);
+      } catch (_) {}
+      delete update.feeReceiptSettingsJson;
+    }
+    if (parsedFeeReceiptSettings) {
+      const existing =
+        schoolDoc.feeReceiptSettings?.toObject?.() || schoolDoc.feeReceiptSettings || {};
+      update.feeReceiptSettings = {
+        ...existing,
+        ...parsedFeeReceiptSettings,
+      };
+    }
+
+    // ID card print template settings
+    let parsedIdCardSettings = null;
+    if (update.idCardSettings && typeof update.idCardSettings === "string") {
+      try {
+        parsedIdCardSettings = JSON.parse(update.idCardSettings);
+      } catch (_) {}
+    } else if (update.idCardSettings && typeof update.idCardSettings === "object") {
+      parsedIdCardSettings = update.idCardSettings;
+    } else if (update.idCardSettingsJson) {
+      try {
+        parsedIdCardSettings = JSON.parse(update.idCardSettingsJson);
+      } catch (_) {}
+      delete update.idCardSettingsJson;
+    }
+    if (parsedIdCardSettings) {
+      const existing =
+        schoolDoc.idCardSettings?.toObject?.() || schoolDoc.idCardSettings || {};
+      update.idCardSettings = {
+        ...existing,
+        ...parsedIdCardSettings,
+      };
+    }
+
+    // Marksheet / report card print template settings
+    let parsedMarksheetSettings = null;
+    if (update.marksheetSettings && typeof update.marksheetSettings === "string") {
+      try {
+        parsedMarksheetSettings = JSON.parse(update.marksheetSettings);
+      } catch (_) {}
+    } else if (update.marksheetSettings && typeof update.marksheetSettings === "object") {
+      parsedMarksheetSettings = update.marksheetSettings;
+    } else if (update.marksheetSettingsJson) {
+      try {
+        parsedMarksheetSettings = JSON.parse(update.marksheetSettingsJson);
+      } catch (_) {}
+      delete update.marksheetSettingsJson;
+    }
+    if (parsedMarksheetSettings) {
+      const existing =
+        schoolDoc.marksheetSettings?.toObject?.() || schoolDoc.marksheetSettings || {};
+      update.marksheetSettings = {
+        ...existing,
+        ...parsedMarksheetSettings,
+      };
     }
 
     const school = await School.findByIdAndUpdate(req.params.id, update, {

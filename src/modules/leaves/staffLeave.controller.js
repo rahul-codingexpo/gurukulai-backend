@@ -9,12 +9,13 @@ const resolveSchoolId = (req) => {
   return req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
 };
 
-/** Admin/Principal manage all school staff leaves; Staff/Teacher only their own. */
+/** Admin/Principal/SuperAdmin manage all school staff leaves. */
 const canManageSchoolStaffLeaves = (roleName) =>
   ["Admin", "Principal", "SuperAdmin"].includes(roleName);
 
+/** Non-managers (Staff, Teacher, Accountant, etc.) only see/manage their own. */
 const isSelfServiceStaffRole = (roleName) =>
-  ["Staff", "Teacher"].includes(roleName);
+  Boolean(roleName) && !canManageSchoolStaffLeaves(roleName);
 
 const resolveLinkedStaff = async (userId) =>
   Staff.findOne({ userId }).select("_id schoolId phone name designation");

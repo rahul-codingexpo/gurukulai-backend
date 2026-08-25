@@ -23,7 +23,18 @@ const staffSchema = new mongoose.Schema(
 
     designation: {
       type: String,
-      enum: ["Principal", "Teacher", "Staff"],
+      enum: [
+        "Principal",
+        "Vice Principal",
+        "Teacher",
+        "Accountant",
+        "Librarian",
+        "Receptionist",
+        "Clerk",
+        "Peon",
+        "Driver",
+        "Staff",
+      ],
       required: true,
     },
 

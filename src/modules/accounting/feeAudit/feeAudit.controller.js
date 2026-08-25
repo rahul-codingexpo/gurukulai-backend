@@ -5,6 +5,7 @@ import PastFeeRecord from "../pastFees/pastFeeRecord.model.js";
 import Payment from "../payment.model.js";
 import User from "../../user/user.model.js";
 import { comparePassword } from "../../../utils/hash.js";
+import { schoolIdMatchValue } from "../../../utils/branchScope.util.js";
 
 const ok = (res, payload) => res.json({ success: true, ...payload });
 const fail = (res, status, message) =>
@@ -20,7 +21,7 @@ const ALLOWED_ACTIONS = ["created", "updated", "deleted", "restored"];
  */
 export const listFeeAuditLogs = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) {
       return fail(
         res,
@@ -133,7 +134,7 @@ export const listFeeAuditLogs = async (req, res, next) => {
  */
 export const getFeeAuditTimeline = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) {
       return fail(
         res,
@@ -202,7 +203,7 @@ export const getFeeAuditTimeline = async (req, res, next) => {
  */
 export const permanentlyDeleteFeeSources = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) {
       return fail(
         res,

@@ -1,6 +1,7 @@
 import FeeType from "./feeType.model.js";
 import FeeInvoice from "./feeInvoice.model.js";
 import ClassModel from "../academic/class.model.js";
+import { schoolIdFilter, schoolIdMatchValue } from "../../utils/branchScope.util.js";
 
 const requireSchool = (req, res) => {
   if (!req.schoolId) {
@@ -108,7 +109,7 @@ export const getFeeTypes = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
     const { status, search, classId, className } = req.query;
-    const filter = { schoolId: req.schoolId };
+    const filter = { ...schoolIdFilter(req) };
     if (status) filter.status = status;
     if (search && String(search).trim()) {
       const s = String(search).trim();
@@ -132,7 +133,7 @@ export const getFeeTypes = async (req, res, next) => {
       ];
     } else if (className && String(className).trim()) {
       const classes = await ClassModel.find({
-        schoolId: req.schoolId,
+        schoolId: schoolIdMatchValue(req),
         name: String(className).trim(),
       })
         .select("_id")
@@ -164,7 +165,7 @@ export const getFeeTypeById = async (req, res, next) => {
     const feeType = await populateFeeType(
       FeeType.findOne({
         _id: req.params.id,
-        schoolId: req.schoolId,
+        ...schoolIdFilter(req),
       }),
     );
     if (!feeType) {
@@ -183,7 +184,7 @@ export const updateFeeType = async (req, res, next) => {
     const { name, code, amount, period, description, icon, status, classIds } = req.body || {};
     const feeType = await FeeType.findOne({
       _id: req.params.id,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
     });
     if (!feeType) {
       return res.status(404).json({ success: false, message: "Fee type not found" });
@@ -206,7 +207,7 @@ export const updateFeeType = async (req, res, next) => {
     if (status !== undefined) feeType.status = status;
     if (classIds !== undefined) {
       try {
-        feeType.classIds = await normalizeClassIds(req.schoolId, classIds);
+        feeType.classIds = await normalizeClassIds(feeType.schoolId, classIds);
       } catch (e) {
         return res.status(e.statusCode || 400).json({
           success: false,
@@ -228,7 +229,7 @@ export const deleteFeeType = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const count = await FeeInvoice.countDocuments({
       feeTypeId: req.params.id,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
     });
     if (count > 0) {
       return res.status(400).json({
@@ -238,7 +239,7 @@ export const deleteFeeType = async (req, res, next) => {
     }
     const deleted = await FeeType.findOneAndDelete({
       _id: req.params.id,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
     });
     if (!deleted) {
       return res.status(404).json({ success: false, message: "Fee type not found" });

@@ -1,6 +1,7 @@
 import express from "express";
-import { createSchool, getSchools, updateSchool, deleteSchool } from "./school.controller.js";
+import { createSchool, getSchools, getBranchCampuses, updateSchool, deleteSchool } from "./school.controller.js";
 import { onboardSchool } from "./school.onboard.controller.js";
+import { branchOnboard } from "./school.branchOnboard.controller.js";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
 import upload from "../../middleware/upload.middleware.js";
@@ -22,9 +23,24 @@ router.post(
 );
 
 /**
+ * SuperAdmin onboards a branch group with one or more campuses
+ */
+router.post(
+  "/branch-onboard",
+  protect,
+  authorize("SuperAdmin"),
+  branchOnboard,
+);
+
+/**
  * List schools
  */
 router.get("/", protect, getSchools);
+
+/**
+ * Campuses in the logged-in user's branch (accounting campus picker)
+ */
+router.get("/branch-campuses", protect, getBranchCampuses);
 
 /**
  * Update school

@@ -1,6 +1,7 @@
 import FeeInvoice from "./feeInvoice.model.js";
 import FeeType from "./feeType.model.js";
 import Payment from "./payment.model.js";
+import { schoolIdMatchValue } from "../../utils/branchScope.util.js";
 
 const requireSchool = (req, res) => {
   if (!req.schoolId) {
@@ -22,7 +23,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 export const getDashboard = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);

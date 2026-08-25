@@ -131,6 +131,10 @@ import Session from "../academic/session.model.js";
 import bcrypt from "bcryptjs";
 import XLSX from "xlsx";
 import fs from "fs";
+import {
+  resolveBranchSchoolIds,
+  isBranchAccountingRole,
+} from "../../utils/branchScope.util.js";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 import { parseSheetDate, normalizeSheetPhone, normalizeSheetText } from "../../utils/parseSheetDate.util.js";
@@ -1202,8 +1206,26 @@ export const bulkCreateStudentsFromExcel = async (req, res, next) => {
 export const getStudents = async (req, res, next) => {
   try {
     const schoolId = resolveSchoolId(req);
+    const roleName = req.user?.roleId?.name;
+    const branchScope =
+      String(req.query.branchScope || "").trim() === "1" ||
+      String(req.query.branchScope || "").toLowerCase() === "true";
 
-    const students = await Student.find({ schoolId });
+    let filterSchoolId = schoolId;
+    const requestedSchoolId = req.query.schoolId;
+    if (isBranchAccountingRole(roleName) && requestedSchoolId && schoolId) {
+      const ids = await resolveBranchSchoolIds(schoolId);
+      if (ids.some((id) => String(id) === String(requestedSchoolId))) {
+        filterSchoolId = requestedSchoolId;
+      } else if (branchScope && ids.length > 1) {
+        filterSchoolId = { $in: ids };
+      }
+    } else if (branchScope && isBranchAccountingRole(roleName) && schoolId) {
+      const ids = await resolveBranchSchoolIds(schoolId);
+      filterSchoolId = ids.length > 1 ? { $in: ids } : ids[0] || schoolId;
+    }
+
+    const students = await Student.find({ schoolId: filterSchoolId });
 
     res.json({
       success: true,

@@ -1,7 +1,10 @@
 import express from "express";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
-import { injectSchool } from "../../middleware/injectSchool.middleware.js";
+import {
+  injectSchool,
+  injectBranchSchoolScope,
+} from "../../middleware/injectSchool.middleware.js";
 import {
   listStudentFeeDiscounts,
   getStudentFeeDiscountsByStudent,
@@ -18,6 +21,7 @@ router.get(
   protect,
   authorize(...readAccess),
   injectSchool,
+  injectBranchSchoolScope,
   listStudentFeeDiscounts,
 );
 router.get(
@@ -25,6 +29,7 @@ router.get(
   protect,
   authorize(...readAccess),
   injectSchool,
+  injectBranchSchoolScope,
   getStudentFeeDiscountsByStudent,
 );
 router.put(
@@ -32,6 +37,7 @@ router.put(
   protect,
   authorize(...writeAccess),
   injectSchool,
+  injectBranchSchoolScope,
   upsertStudentFeeDiscounts,
 );
 

@@ -10,6 +10,7 @@ import FeeType from "../feeType.model.js";
 import Payment from "../payment.model.js";
 import { writeFeeAudit, diffTrackedFields } from "../feeAudit/feeAudit.service.js";
 import { normalizeWhatsAppPhone } from "../../../utils/phone.util.js";
+import { schoolIdMatchValue } from "../../../utils/branchScope.util.js";
 
 const TRACKED_PAST_FEE_FIELDS = [
   "dueAmount",
@@ -439,7 +440,7 @@ export const createPastFeeRecord = async (req, res, next) => {
 
 export const listPastFeeImports = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const session = req.query.session ? String(req.query.session).trim() : "";
@@ -489,7 +490,7 @@ export const listPastFeeImports = async (req, res, next) => {
 
 export const listPastFeeRecords = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const session = req.query.session ? String(req.query.session).trim() : null;
@@ -649,7 +650,7 @@ export const listPastFeeRecords = async (req, res, next) => {
 
 export const getStudentPastFeeSummary = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) return fail(res, 400, "School context missing");
     const { studentId } = req.params;
 
@@ -701,7 +702,7 @@ export const getStudentPastFeeSummary = async (req, res, next) => {
 /** Edit a single past-fee record. Updates due/paid/balance, dates, remarks etc. */
 export const updatePastFeeRecord = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
@@ -819,7 +820,7 @@ export const updatePastFeeRecord = async (req, res, next) => {
 /** Soft delete a past fee record. */
 export const softDeletePastFeeRecord = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
@@ -854,7 +855,7 @@ export const softDeletePastFeeRecord = async (req, res, next) => {
 /** Restore a soft-deleted past fee record. */
 export const restorePastFeeRecord = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
@@ -1035,7 +1036,8 @@ async function ensurePastFeeInvoice(record, schoolId, user) {
 /** Prepare WhatsApp message for past-fee due balance (student or parents). */
 export const preparePastFeeWhatsApp = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
+    if (!schoolId) return fail(res, 400, "School context missing");
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
@@ -1045,7 +1047,9 @@ export const preparePastFeeWhatsApp = async (req, res, next) => {
     });
     if (!record) return fail(res, 404, "Past fee record not found");
 
-    const student = await Student.findOne({ _id: record.studentId, schoolId })
+    const campusSchoolId = record.schoolId;
+
+    const student = await Student.findOne({ _id: record.studentId, schoolId: campusSchoolId })
       .select("name admissionNumber className section phone parents")
       .lean();
     if (!student) return fail(res, 404, "Student not found");
@@ -1055,7 +1059,7 @@ export const preparePastFeeWhatsApp = async (req, res, next) => {
       return fail(res, 400, resolved.error || "No valid WhatsApp phone found");
     }
 
-    const school = await School.findById(schoolId).select("name").lean();
+    const school = await School.findById(campusSchoolId).select("name").lean();
     const schoolName = school?.name || "School";
     const classSection =
       [record.className || student.className, record.section || student.section]
@@ -1124,7 +1128,7 @@ export const preparePastFeeWhatsApp = async (req, res, next) => {
 /** Record a payment on a past-fee row and create/update the linked fee invoice. */
 export const recordPastFeePayment = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = schoolIdMatchValue(req);
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
@@ -1134,6 +1138,7 @@ export const recordPastFeePayment = async (req, res, next) => {
     });
     if (!record) return fail(res, 404, "Past fee record not found");
 
+    const campusSchoolId = record.schoolId;
     const { amount, method, receiptNumber, chequeNumber, bankRef, paymentDate, remarks } =
       req.body || {};
     if (amount == null || !method) {
@@ -1153,7 +1158,7 @@ export const recordPastFeePayment = async (req, res, next) => {
     }
 
     const before = record.toObject();
-    const invoice = await ensurePastFeeInvoice(record, schoolId, req.user);
+    const invoice = await ensurePastFeeInvoice(record, campusSchoolId, req.user);
 
     const invoiceBalance = roundMoney((invoice.amount || 0) - (invoice.paid || 0));
     if (payAmount > invoiceBalance && invoiceBalance >= 0) {
@@ -1165,7 +1170,7 @@ export const recordPastFeePayment = async (req, res, next) => {
 
     const date = paymentDate ? new Date(paymentDate) : new Date();
     const payment = await Payment.create({
-      schoolId,
+      schoolId: campusSchoolId,
       invoiceId: invoice._id,
       studentId: record.studentId,
       amount: payAmount,
@@ -1195,7 +1200,7 @@ export const recordPastFeePayment = async (req, res, next) => {
     await record.save();
 
     await writeFeeAudit({
-      schoolId,
+      schoolId: campusSchoolId,
       sourceType: "PastFeeRecord",
       sourceId: record._id,
       action: "updated",

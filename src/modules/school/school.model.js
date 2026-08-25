@@ -127,6 +127,71 @@ const schoolSchema = new mongoose.Schema(
       default: "ACTIVE",
     },
 
+    // Shared branch/group linking multiple campus schools (optional).
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+      index: true,
+    },
+
+    // Per-school fee invoice / receipt print template.
+    feeReceiptSettings: {
+      template: {
+        type: String,
+        enum: ["classic", "ribbonBlue", "ribbonMaroon"],
+        default: "classic",
+      },
+      textColor: {
+        type: String,
+        default: "#b91c1c",
+        trim: true,
+      },
+      backgroundColor: {
+        type: String,
+        default: "#fffdf5",
+        trim: true,
+      },
+    },
+
+    // Per-school student ID card print preset (3 visual templates).
+    idCardSettings: {
+      template: {
+        type: String,
+        enum: ["horizontalBlue", "verticalGreen", "verticalNavy"],
+        default: "horizontalBlue",
+      },
+      textColor: {
+        type: String,
+        default: "#0B3A6E",
+        trim: true,
+      },
+      backgroundColor: {
+        type: String,
+        default: "#FFFFFF",
+        trim: true,
+      },
+    },
+
+    // Per-school marksheet / report card print preset (3 visual templates).
+    marksheetSettings: {
+      template: {
+        type: String,
+        enum: ["annualDetailed", "progressLandscape", "termCbse"],
+        default: "annualDetailed",
+      },
+      textColor: {
+        type: String,
+        default: "#1E3A8A",
+        trim: true,
+      },
+      backgroundColor: {
+        type: String,
+        default: "#FFFFFF",
+        trim: true,
+      },
+    },
+
     // Per-school timetable view template (Option D — Hybrid).
     // - "default": theme-customizable HTML grid
     // - "imageOverlay": school-uploaded blank template image with cell overlay

@@ -1,6 +1,7 @@
 import WalletPayment from "../wallet/walletPayment.model.js";
 import Wallet from "../wallet/wallet.model.js";
 import FeeInvoice from "./feeInvoice.model.js";
+import { schoolIdMatchValue } from "../../utils/branchScope.util.js";
 
 const ensureSchoolId = (req, res) => {
   if (!req.schoolId) {
@@ -13,7 +14,7 @@ const ensureSchoolId = (req, res) => {
     });
     return null;
   }
-  return req.schoolId;
+  return schoolIdMatchValue(req);
 };
 
 /** GET /api/wallet-payments (Admin/Principal/Accountant) */
@@ -81,8 +82,10 @@ export const approveWalletPayment = async (req, res, next) => {
       });
     }
 
+    const campusSchoolId = payment.schoolId;
+
     const wallet = await Wallet.findOneAndUpdate(
-      { schoolId, studentId: payment.studentId },
+      { schoolId: campusSchoolId, studentId: payment.studentId },
       { $setOnInsert: { credit: 0 } },
       { upsert: true, new: true }
     );
@@ -90,7 +93,7 @@ export const approveWalletPayment = async (req, res, next) => {
     // Apply to invoices due till now
     const now = new Date();
     const invoices = await FeeInvoice.find({
-      schoolId,
+      schoolId: campusSchoolId,
       studentId: payment.studentId,
       status: { $in: ["Pending", "Partial", "Overdue"] },
       dueDate: { $lte: now },

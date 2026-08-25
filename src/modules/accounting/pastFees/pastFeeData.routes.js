@@ -2,7 +2,10 @@ import express from "express";
 import multer from "multer";
 import { protect } from "../../../middleware/auth.middleware.js";
 import { authorize } from "../../../middleware/role.middleware.js";
-import { injectSchool } from "../../../middleware/injectSchool.middleware.js";
+import {
+  injectSchool,
+  injectBranchSchoolScope,
+} from "../../../middleware/injectSchool.middleware.js";
 import {
   importPastFees,
   createPastFeeRecord,
@@ -56,6 +59,7 @@ router.post(
   denySuperAdmin,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   createPastFeeRecord,
 );
 
@@ -66,6 +70,7 @@ router.post(
   denySuperAdmin,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   uploadPastFeeFile.single("file"),
   importPastFees,
 );
@@ -77,6 +82,7 @@ router.get(
   denySuperAdmin,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   listPastFeeImports,
 );
 
@@ -87,6 +93,7 @@ router.get(
   denySuperAdmin,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   listPastFeeRecords,
 );
 
@@ -97,6 +104,7 @@ router.get(
   denySuperAdmin,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   getStudentPastFeeSummary,
 );
 
@@ -107,6 +115,7 @@ router.post(
   denySuperAdmin,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   preparePastFeeWhatsApp,
 );
 
@@ -117,6 +126,7 @@ router.post(
   denySuperAdmin,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   recordPastFeePayment,
 );
 
@@ -127,6 +137,7 @@ router.put(
   denySuperAdmin,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   updatePastFeeRecord,
 );
 
@@ -137,6 +148,7 @@ router.delete(
   denySuperAdmin,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   softDeletePastFeeRecord,
 );
 
@@ -147,6 +159,7 @@ router.post(
   denySuperAdmin,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   restorePastFeeRecord,
 );
 

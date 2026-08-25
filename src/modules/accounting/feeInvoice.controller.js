@@ -7,6 +7,7 @@ import { notifyFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
 import { generateAndUploadInvoicePdf, buildInvoicePdfBuffer } from "../../services/invoicePdf.service.js";
 import { normalizeWhatsAppPhone } from "../../utils/phone.util.js";
 import { writeFeeAudit, diffTrackedFields } from "./feeAudit/feeAudit.service.js";
+import { schoolIdFilter } from "../../utils/branchScope.util.js";
 
 const TRACKED_INVOICE_FIELDS = [
   "amount",
@@ -129,6 +130,19 @@ async function markOverdue(schoolId) {
   );
 }
 
+async function markOverdueForScope(req) {
+  const ids =
+    Array.isArray(req.schoolIds) && req.schoolIds.length
+      ? req.schoolIds
+      : req.schoolId
+        ? [req.schoolId]
+        : [];
+  for (const id of ids) {
+    // eslint-disable-next-line no-await-in-loop
+    await markOverdue(id);
+  }
+}
+
 /** Create single invoice */
 export const createInvoice = async (req, res, next) => {
   try {
@@ -171,9 +185,29 @@ export const createInvoice = async (req, res, next) => {
         message: "Final payable after discount cannot be negative",
       });
     }
+    const student = await Student.findOne({
+      _id: studentId,
+      ...schoolIdFilter(req),
+    }).select("_id schoolId");
+    if (!student) {
+      return res.status(404).json({ success: false, message: "Student not found" });
+    }
+    const campusSchoolId = student.schoolId;
+
+    const feeType = await FeeType.findOne({
+      _id: feeTypeId,
+      schoolId: campusSchoolId,
+    }).select("_id");
+    if (!feeType) {
+      return res.status(404).json({
+        success: false,
+        message: "Fee type not found for the student's campus",
+      });
+    }
+
     const periodStr = period ? String(period).trim() : "";
     const existing = await FeeInvoice.findOne({
-      schoolId: req.schoolId,
+      schoolId: campusSchoolId,
       studentId,
       feeTypeId,
       period: periodStr,
@@ -247,9 +281,9 @@ export const createInvoice = async (req, res, next) => {
       }
     }
 
-    const invoiceNumber = await getNextInvoiceNumber(req.schoolId);
+    const invoiceNumber = await getNextInvoiceNumber(campusSchoolId);
     const invoice = await FeeInvoice.create({
-      schoolId: req.schoolId,
+      schoolId: campusSchoolId,
       invoiceNumber,
       studentId,
       feeTypeId,
@@ -266,7 +300,7 @@ export const createInvoice = async (req, res, next) => {
     });
     const populated = await populateInvoice(FeeInvoice.findById(invoice._id));
     await writeFeeAudit({
-      schoolId: req.schoolId,
+      schoolId: campusSchoolId,
       sourceType: "FeeInvoice",
       sourceId: invoice._id,
       action: "created",
@@ -388,7 +422,7 @@ export const createBulkInvoices = async (req, res, next) => {
 export const getInvoices = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    await markOverdue(req.schoolId);
+    await markOverdueForScope(req);
     const includeDeleted = String(req.query.includeDeleted || "").toLowerCase() === "true";
     const {
       status,
@@ -400,7 +434,7 @@ export const getInvoices = async (req, res, next) => {
       page = 1,
       limit = 20,
     } = req.query;
-    const filter = { schoolId: req.schoolId };
+    const filter = { ...schoolIdFilter(req) };
     if (!includeDeleted) filter.isDeleted = { $ne: true };
     if (status) filter.status = status;
     if (studentId) filter.studentId = studentId;
@@ -413,7 +447,7 @@ export const getInvoices = async (req, res, next) => {
     if (search && String(search).trim()) {
       const s = String(search).trim();
       const matchingStudents = await Student.find({
-        schoolId: req.schoolId,
+        ...schoolIdFilter(req),
         name: new RegExp(s, "i"),
       })
         .select("_id")
@@ -429,6 +463,7 @@ export const getInvoices = async (req, res, next) => {
     const invoices = await FeeInvoice.find(filter)
       .populate("studentId", "name admissionNumber className section rollNumber phone parents")
       .populate("feeTypeId", "name code amount period")
+      .populate("schoolId", "name schoolCode address city state pincode")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Math.min(100, Math.max(1, parseInt(limit, 10))))
@@ -465,7 +500,7 @@ export const sendInvoicesWhatsApp = async (req, res, next) => {
     const uniqueIds = [...new Set(invoiceIds.map((id) => String(id)))];
     const invoices = await FeeInvoice.find({
       _id: { $in: uniqueIds },
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       isDeleted: { $ne: true },
       status: { $ne: "Cancelled" },
     })
@@ -604,7 +639,7 @@ export const prepareManualWhatsApp = async (req, res, next) => {
     const uniqueIds = [...new Set(invoiceIds.map((id) => String(id)))];
     const invoices = await FeeInvoice.find({
       _id: { $in: uniqueIds },
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       isDeleted: { $ne: true },
       status: { $ne: "Cancelled" },
     })
@@ -633,7 +668,8 @@ export const prepareManualWhatsApp = async (req, res, next) => {
     }
     const phone = resolved.phone;
 
-    const school = await School.findById(req.schoolId)
+    const campusSchoolId = invoices[0].schoolId;
+    const school = await School.findById(campusSchoolId)
       .select("name logo address city state pincode phone email affiliation schoolCode")
       .lean();
     const schoolName = school?.name || "School";
@@ -760,7 +796,7 @@ export const downloadInvoicePdf = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const invoice = await FeeInvoice.findOne({
       _id: req.params.id,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       isDeleted: { $ne: true },
     })
       .populate("studentId", "name admissionNumber className section rollNumber phone parents")
@@ -771,7 +807,7 @@ export const downloadInvoicePdf = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
 
-    const school = await School.findById(req.schoolId)
+    const school = await School.findById(invoice.schoolId)
       .select("name logo address city state pincode phone email affiliation schoolCode")
       .lean();
 
@@ -818,18 +854,19 @@ export const getInvoiceById = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const invoice = await FeeInvoice.findOne({
       _id: req.params.id,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       isDeleted: { $ne: true },
     })
       .populate("studentId", "name admissionNumber className section rollNumber phone parents")
       .populate("feeTypeId", "name code amount period")
+      .populate("schoolId", "name schoolCode address city state pincode")
       .lean();
     if (!invoice) {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
     const payments = await Payment.find({
       invoiceId: invoice._id,
-      schoolId: req.schoolId,
+      schoolId: invoice.schoolId?._id || invoice.schoolId,
     })
       .populate("receivedBy", "name")
       .sort({ paymentDate: 1 })
@@ -849,7 +886,7 @@ export const updateInvoice = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const invoice = await FeeInvoice.findOne({
       _id: req.params.id,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       isDeleted: { $ne: true },
     });
     if (!invoice) {
@@ -928,7 +965,7 @@ export const updateInvoice = async (req, res, next) => {
     const changes = diffTrackedFields(beforeSnap, populated, TRACKED_INVOICE_FIELDS);
     if (changes.length) {
       await writeFeeAudit({
-        schoolId: req.schoolId,
+        schoolId: invoice.schoolId,
         sourceType: "FeeInvoice",
         sourceId: invoice._id,
         action: "updated",
@@ -950,7 +987,7 @@ export const deleteInvoice = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const invoice = await FeeInvoice.findOne({
       _id: req.params.id,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       isDeleted: { $ne: true },
     });
     if (!invoice) {
@@ -962,7 +999,7 @@ export const deleteInvoice = async (req, res, next) => {
     invoice.deletedBy = req.user?._id;
     await invoice.save();
     await writeFeeAudit({
-      schoolId: req.schoolId,
+      schoolId: invoice.schoolId,
       sourceType: "FeeInvoice",
       sourceId: invoice._id,
       action: "deleted",
@@ -982,7 +1019,7 @@ export const restoreInvoice = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const invoice = await FeeInvoice.findOne({
       _id: req.params.id,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
       isDeleted: true,
     });
     if (!invoice) {
@@ -997,7 +1034,7 @@ export const restoreInvoice = async (req, res, next) => {
     await invoice.save();
     const populated = await populateInvoice(FeeInvoice.findById(invoice._id)).lean();
     await writeFeeAudit({
-      schoolId: req.schoolId,
+      schoolId: invoice.schoolId,
       sourceType: "FeeInvoice",
       sourceId: invoice._id,
       action: "restored",

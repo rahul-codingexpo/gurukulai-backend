@@ -4,6 +4,10 @@ import Role from "../auth/role.model.js";
 import bcrypt from "bcryptjs";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
+import {
+  isBranchAccountingRole,
+  resolveBranchSchoolIds,
+} from "../../utils/branchScope.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -11,6 +15,20 @@ const resolveSchoolId = (req) => {
     return req.query.schoolId || req.body.schoolId || req.params.schoolId || null;
   }
   return req.user.schoolId;
+};
+
+const resolveStaffListSchoolId = async (req) => {
+  const roleName = req.user?.roleId?.name;
+  if (roleName === "SuperAdmin") {
+    return resolveSchoolId(req);
+  }
+  const homeId = req.user?.schoolId?._id || req.user?.schoolId;
+  const requested = req.query.schoolId;
+  if (isBranchAccountingRole(roleName) && requested && homeId) {
+    const ids = await resolveBranchSchoolIds(homeId);
+    if (ids.some((id) => String(id) === String(requested))) return requested;
+  }
+  return homeId;
 };
 
 const allowedDocumentMimeTypes = new Set([
@@ -28,6 +46,36 @@ const optionalTrimmedValue = (value) => {
   return trimmed === "" ? undefined : trimmed;
 };
 
+const ALLOWED_DESIGNATIONS = [
+  "Principal",
+  "Vice Principal",
+  "Teacher",
+  "Accountant",
+  "Librarian",
+  "Receptionist",
+  "Clerk",
+  "Peon",
+  "Driver",
+  "Staff",
+];
+
+/** Map staff designation → User Role.name (Role enum has no Vice Principal / Receptionist / etc.). */
+const DESIGNATION_TO_ROLE = {
+  Principal: "Principal",
+  "Vice Principal": "Staff",
+  Teacher: "Teacher",
+  Accountant: "Accountant",
+  Librarian: "Librarian",
+  Receptionist: "Staff",
+  Clerk: "Staff",
+  Peon: "Staff",
+  Driver: "Staff",
+  Staff: "Staff",
+};
+
+const resolveRoleNameForDesignation = (designation) =>
+  DESIGNATION_TO_ROLE[String(designation || "").trim()] || "Staff";
+
 const validateCreatePayload = (payload) => {
   const { name, designation, salary, joiningDate, status } = payload;
 
@@ -37,9 +85,9 @@ const validateCreatePayload = (payload) => {
 
   if (
     !designation ||
-    !["Principal", "Teacher", "Staff"].includes(String(designation).trim())
+    !ALLOWED_DESIGNATIONS.includes(String(designation).trim())
   ) {
-    return "designation must be Principal, Teacher, or Staff";
+    return `designation must be one of: ${ALLOWED_DESIGNATIONS.join(", ")}`;
   }
 
   if (salary !== undefined && salary !== null && salary !== "") {
@@ -88,9 +136,10 @@ const syncStaffLoginUser = async ({
   const schoolId = existingStaff.schoolId;
 
   const resolveRole = async () => {
-    const role = await Role.findOne({ name: normalizedDesignation });
+    const roleName = resolveRoleNameForDesignation(normalizedDesignation);
+    const role = await Role.findOne({ name: roleName });
     if (!role) {
-      const err = new Error("Role not found");
+      const err = new Error(`Role not found for designation "${normalizedDesignation}" (expected role: ${roleName})`);
       err.statusCode = 404;
       throw err;
     }
@@ -368,7 +417,7 @@ export const createStaff = async (req, res, next) => {
 
 export const getStaff = async (req, res, next) => {
   try {
-    const schoolId = resolveSchoolId(req);
+    const schoolId = await resolveStaffListSchoolId(req);
 
     const staff = await Staff.find({ schoolId }).populate(
       "userId",

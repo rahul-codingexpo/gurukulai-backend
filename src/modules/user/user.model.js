@@ -132,6 +132,17 @@ const userSchema = new mongoose.Schema(
       default: "ACTIVE",
     },
 
+    /**
+     * Nav section tab IDs this user may see (e.g. "ac-feeinvoices", "sa-homework").
+     * null/undefined = unrestricted (legacy full menu).
+     * [] = no section access.
+     * Only enforced for roles other than SuperAdmin / Admin / Principal.
+     */
+    allowedSections: {
+      type: [String],
+      default: undefined,
+    },
+
     passwordReset: {
       type: passwordResetSchema,
       select: false,

@@ -1,6 +1,7 @@
 import Payment from "./payment.model.js";
 import FeeInvoice from "./feeInvoice.model.js";
 import { queueFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
+import { schoolIdFilter } from "../../utils/branchScope.util.js";
 
 const requireSchool = (req, res) => {
   if (!req.schoolId) {
@@ -51,7 +52,7 @@ export const recordPayment = async (req, res, next) => {
     }
     const invoice = await FeeInvoice.findOne({
       _id: invoiceId,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
     });
     if (!invoice) {
       return res.status(404).json({ success: false, message: "Invoice not found" });
@@ -77,7 +78,7 @@ export const recordPayment = async (req, res, next) => {
     }
     const date = paymentDate ? new Date(paymentDate) : new Date();
     const payment = await Payment.create({
-      schoolId: req.schoolId,
+      schoolId: invoice.schoolId,
       invoiceId,
       studentId: invoice.studentId,
       amount: Number(amount),
@@ -124,7 +125,7 @@ export const getPayments = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const { invoiceId, studentId, method, fromDate, toDate, page = 1, limit = 20 } =
       req.query;
-    const filter = { schoolId: req.schoolId };
+    const filter = { ...schoolIdFilter(req) };
     if (invoiceId) filter.invoiceId = invoiceId;
     if (studentId) filter.studentId = studentId;
     if (method) filter.method = method;
@@ -166,14 +167,14 @@ export const getPaymentsByInvoiceId = async (req, res, next) => {
     if (!requireSchool(req, res)) return;
     const invoice = await FeeInvoice.findOne({
       _id: req.params.invoiceId,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
     });
     if (!invoice) {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
     const payments = await Payment.find({
       invoiceId: req.params.invoiceId,
-      schoolId: req.schoolId,
+      ...schoolIdFilter(req),
     })
       .populate("receivedBy", "name")
       .sort({ paymentDate: 1, createdAt: 1 })

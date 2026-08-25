@@ -6,6 +6,10 @@ import {
   getSchoolAdmins,
   updateSchoolAdmin,
 } from "./user.controller.js";
+import {
+  listSectionAccess,
+  updateSectionAccess,
+} from "./sectionAccess.controller.js";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
 
@@ -23,7 +27,21 @@ router.post(
   authorize("SuperAdmin"),
   createPrincipal,
 );
-// Only SuperAdmin & Admin allowed
+
+/* Admin / Principal — Control Panel section access */
+router.get(
+  "/section-access",
+  protect,
+  authorize("Admin", "Principal", "SuperAdmin"),
+  listSectionAccess,
+);
+router.put(
+  "/:id/section-access",
+  protect,
+  authorize("Admin", "Principal", "SuperAdmin"),
+  updateSectionAccess,
+);
+
 router.get(
   "/profile",
   protect,
@@ -35,6 +53,8 @@ router.get(
     "Staff",
     "Student",
     "Parent",
+    "Accountant",
+    "Librarian",
   ),
   (req, res) => {
     res.json({

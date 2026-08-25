@@ -1,7 +1,10 @@
 import express from "express";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
-import { injectSchool } from "../../middleware/injectSchool.middleware.js";
+import {
+  injectSchool,
+  injectBranchSchoolScope,
+} from "../../middleware/injectSchool.middleware.js";
 
 import {
   createFeeType,
@@ -50,6 +53,7 @@ router.post(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   createFeeType
 );
 router.get(
@@ -57,6 +61,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant", "Teacher", "SuperAdmin"),
   injectSchool,
+  injectBranchSchoolScope,
   getFeeTypes
 );
 router.get(
@@ -64,6 +69,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   getFeeTypeById
 );
 router.put(
@@ -71,6 +77,7 @@ router.put(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   updateFeeType
 );
 router.delete(
@@ -78,6 +85,7 @@ router.delete(
   protect,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   deleteFeeType
 );
 
@@ -87,6 +95,7 @@ router.post(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   createInvoice
 );
 router.post(
@@ -94,6 +103,7 @@ router.post(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   createBulkInvoices
 );
 router.get(
@@ -101,6 +111,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   injectSchool,
+  injectBranchSchoolScope,
   getInvoices
 );
 router.post(
@@ -108,6 +119,7 @@ router.post(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   sendInvoicesWhatsApp
 );
 router.post(
@@ -115,6 +127,7 @@ router.post(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   prepareManualWhatsApp
 );
 router.get(
@@ -122,6 +135,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   downloadInvoicePdf
 );
 router.get(
@@ -129,6 +143,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   getInvoiceById
 );
 router.put(
@@ -136,6 +151,7 @@ router.put(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   updateInvoice
 );
 router.delete(
@@ -143,6 +159,7 @@ router.delete(
   protect,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   deleteInvoice
 );
 router.post(
@@ -150,6 +167,7 @@ router.post(
   protect,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   restoreInvoice
 );
 
@@ -159,6 +177,7 @@ router.post(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   recordPayment
 );
 router.get(
@@ -166,6 +185,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   injectSchool,
+  injectBranchSchoolScope,
   getPayments
 );
 router.get(
@@ -173,6 +193,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   getPaymentsByInvoiceId
 );
 
@@ -182,6 +203,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   injectSchool,
+  injectBranchSchoolScope,
   getDashboard
 );
 
@@ -191,6 +213,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   injectSchool,
+  injectBranchSchoolScope,
   getStudentFeeStatus
 );
 
@@ -200,6 +223,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "Accountant", "SuperAdmin"),
   injectSchool,
+  injectBranchSchoolScope,
   listWalletPayments
 );
 router.put(
@@ -207,6 +231,7 @@ router.put(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   approveWalletPayment
 );
 router.put(
@@ -214,6 +239,7 @@ router.put(
   protect,
   authorize("Admin", "Principal", "Accountant"),
   injectSchool,
+  injectBranchSchoolScope,
   rejectWalletPayment
 );
 
@@ -223,6 +249,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "SuperAdmin"),
   injectSchool,
+  injectBranchSchoolScope,
   listFeeAuditLogs,
 );
 router.post(
@@ -230,6 +257,7 @@ router.post(
   protect,
   authorize("Admin", "Principal"),
   injectSchool,
+  injectBranchSchoolScope,
   permanentlyDeleteFeeSources,
 );
 router.get(
@@ -237,6 +265,7 @@ router.get(
   protect,
   authorize("Admin", "Principal", "SuperAdmin"),
   injectSchool,
+  injectBranchSchoolScope,
   getFeeAuditTimeline,
 );
 
