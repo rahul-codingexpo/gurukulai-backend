@@ -24,11 +24,13 @@ router.post(
 
 /**
  * SuperAdmin onboards a branch group with one or more campuses
+ * Multipart: branchName, schools (JSON string), optional logo_0, logo_1, ...
  */
 router.post(
   "/branch-onboard",
   protect,
   authorize("SuperAdmin"),
+  upload.any(),
   branchOnboard,
 );
 

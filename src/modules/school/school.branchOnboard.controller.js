@@ -4,6 +4,7 @@ import School from "./school.model.js";
 import User from "../user/user.model.js";
 import Role from "../auth/role.model.js";
 import { sendSchoolWelcomeEmail } from "../../services/email.service.js";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 
 const SCHOOL_FIELDS = [
   "schoolCode",
@@ -26,10 +27,15 @@ const SCHOOL_FIELDS = [
   "qrCode",
 ];
 
+const isDataUrlLogo = (value) =>
+  typeof value === "string" && /^data:image\//i.test(value.trim());
+
 const pickSchoolPayload = (raw = {}) => {
   const payload = {};
   for (const key of SCHOOL_FIELDS) {
     if (raw[key] !== undefined && raw[key] !== null && raw[key] !== "") {
+      // Never persist base64 data-URL logos from JSON body
+      if (key === "logo" && isDataUrlLogo(raw[key])) continue;
       payload[key] = raw[key];
     }
   }
@@ -58,10 +64,37 @@ const validatePerson = (person, label, index) => {
   return null;
 };
 
+/** Map multipart files logo_0, logo_1, ... to campus index → file */
+const mapLogoFilesByIndex = (files) => {
+  const map = {};
+  const list = Array.isArray(files) ? files : [];
+  for (const file of list) {
+    const m = String(file.fieldname || "").match(/^logo_(\d+)$/);
+    if (!m) continue;
+    map[Number(m[1])] = file;
+  }
+  return map;
+};
+
+const parseSchoolsBody = (raw) => {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+};
+
 /**
  * SuperAdmin onboards a branch group with one or more campus schools.
  * Each campus gets its own Principal + Admin.
- * Body: { branchName, schools: [{ ...schoolFields, principal, admin }] }
+ * Body (JSON or multipart):
+ *   branchName, schools: [{ ...schoolFields, principal, admin }]
+ * Multipart files: logo_0, logo_1, ... (optional per campus index)
  */
 export const branchOnboard = async (req, res, next) => {
   const createdSchoolIds = [];
@@ -69,7 +102,9 @@ export const branchOnboard = async (req, res, next) => {
   let createdBranchId = null;
 
   try {
-    const { branchName, schools } = req.body;
+    const branchName = req.body?.branchName;
+    const schools = parseSchoolsBody(req.body?.schools);
+    const logoByIndex = mapLogoFilesByIndex(req.files);
 
     if (!branchName || !String(branchName).trim()) {
       return res.status(400).json({
@@ -185,6 +220,15 @@ export const branchOnboard = async (req, res, next) => {
     for (let i = 0; i < schools.length; i++) {
       const item = schools[i];
       const schoolPayload = pickSchoolPayload(item);
+
+      const logoFile = logoByIndex[i];
+      if (logoFile) {
+        const logoUrl = uploadedFileUrl(logoFile);
+        if (logoUrl) schoolPayload.logo = logoUrl;
+      } else {
+        // Prefer uploaded file; drop empty / data-URL leftovers
+        delete schoolPayload.logo;
+      }
 
       const school = await School.create({
         ...schoolPayload,
