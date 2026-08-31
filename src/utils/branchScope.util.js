@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import School from "../modules/school/school.model.js";
 
 const BRANCH_ACCOUNTING_ROLES = new Set(["Admin", "Principal", "Accountant"]);
@@ -39,6 +40,27 @@ export const schoolIdMatchValue = (req) => {
     return req.schoolIds[0];
   }
   return req.schoolId;
+};
+
+/** Coerce schoolId (or { $in }) to ObjectId(s) for reliable Mongo queries/aggregations. */
+export const normalizeSchoolIdForQuery = (schoolId) => {
+  if (!schoolId) return null;
+
+  const toObjectId = (value) => {
+    const raw = value?._id || value;
+    if (!raw) return null;
+    if (raw instanceof mongoose.Types.ObjectId) return raw;
+    const str = String(raw);
+    if (!mongoose.Types.ObjectId.isValid(str)) return raw;
+    return new mongoose.Types.ObjectId(str);
+  };
+
+  if (typeof schoolId === "object" && schoolId.$in) {
+    const ids = (schoolId.$in || []).map(toObjectId).filter(Boolean);
+    return ids.length ? { $in: ids } : null;
+  }
+
+  return toObjectId(schoolId);
 };
 
 /**

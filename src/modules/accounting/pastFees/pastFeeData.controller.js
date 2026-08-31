@@ -10,7 +10,7 @@ import FeeType from "../feeType.model.js";
 import Payment from "../payment.model.js";
 import { writeFeeAudit, diffTrackedFields } from "../feeAudit/feeAudit.service.js";
 import { normalizeWhatsAppPhone } from "../../../utils/phone.util.js";
-import { schoolIdMatchValue } from "../../../utils/branchScope.util.js";
+import { schoolIdMatchValue, normalizeSchoolIdForQuery } from "../../../utils/branchScope.util.js";
 
 const TRACKED_PAST_FEE_FIELDS = [
   "dueAmount",
@@ -261,7 +261,7 @@ const validateAndNormalizeBatchRows = async ({
 
 export const importPastFees = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
     if (!req.file) return fail(res, 400, "file is required");
 
@@ -360,7 +360,7 @@ export const importPastFees = async (req, res, next) => {
 
 export const createPastFeeRecord = async (req, res, next) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const admissionNo = String(req.body?.admissionNumber || "").trim();
@@ -440,7 +440,7 @@ export const createPastFeeRecord = async (req, res, next) => {
 
 export const listPastFeeImports = async (req, res, next) => {
   try {
-    const schoolId = schoolIdMatchValue(req);
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const session = req.query.session ? String(req.query.session).trim() : "";
@@ -490,7 +490,7 @@ export const listPastFeeImports = async (req, res, next) => {
 
 export const listPastFeeRecords = async (req, res, next) => {
   try {
-    const schoolId = schoolIdMatchValue(req);
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const session = req.query.session ? String(req.query.session).trim() : null;
@@ -517,6 +517,20 @@ export const listPastFeeRecords = async (req, res, next) => {
     const effectiveClassName = className || classNameFromClassId;
 
     const includeDeleted = String(req.query.includeDeleted || "").toLowerCase() === "true";
+
+    const statusMatch = (() => {
+      if (!status) return null;
+      const s = status.toLowerCase();
+      if (s === "due" || s === "unpaid" || s === "pending") return "Due";
+      if (s === "partial" || s === "partially paid" || s === "partially") return "Partial";
+      if (s === "overdue") return "Overdue";
+      if (s === "paid") return "Paid";
+      return null;
+    })();
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const match = { schoolId };
     if (!includeDeleted) match.isDeleted = { $ne: true };
     if (studentId) {
@@ -534,91 +548,34 @@ export const listPastFeeRecords = async (req, res, next) => {
       match.$or = [{ admissionNumber: rx }, { studentName: rx }];
     }
 
-    const statusMatch = (() => {
-      if (!status) return null;
-      const s = status.toLowerCase();
-      if (s === "due" || s === "unpaid" || s === "pending") return "Due";
-      if (s === "partial" || s === "partially paid" || s === "partially") return "Partial";
-      if (s === "overdue") return "Overdue";
-      if (s === "paid") return "Paid";
-      return null;
-    })();
+    if (statusMatch === "Paid") {
+      match.balance = { $lte: 0 };
+    } else if (statusMatch === "Partial") {
+      match.balance = { $gt: 0 };
+      match.paidAmount = { $gt: 0 };
+    } else if (statusMatch === "Overdue") {
+      match.balance = { $gt: 0 };
+      match.paidAmount = { $lte: 0 };
+      match.dueDate = { $lt: today, $ne: null };
+    } else if (statusMatch === "Due") {
+      match.balance = { $gt: 0 };
+      match.paidAmount = { $lte: 0 };
+      match.$and = [
+        ...(match.$and || []),
+        { $or: [{ dueDate: null }, { dueDate: { $gte: today } }] },
+      ];
+    }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const [total, rows] = await Promise.all([
+      PastFeeRecord.countDocuments(match),
+      PastFeeRecord.find(match)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+    ]);
 
-    const pipeline = [
-      { $match: match },
-      {
-        $addFields: {
-          computedBalance: "$balance",
-          computedStatus: {
-            $cond: [
-              { $lte: ["$balance", 0] },
-              "Paid",
-              {
-                $cond: [
-                  { $gt: ["$paidAmount", 0] },
-                  "Partial",
-                  {
-                    $cond: [
-                      {
-                        $and: [
-                          { $ne: ["$dueDate", null] },
-                          { $lt: ["$dueDate", today] },
-                        ],
-                      },
-                      "Overdue",
-                      "Due",
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-        },
-      },
-    ];
-
-    if (statusMatch) pipeline.push({ $match: { computedStatus: statusMatch } });
-
-    pipeline.push(
-      { $sort: { createdAt: -1 } },
-      {
-        $facet: {
-          items: [
-            { $skip: (page - 1) * limit },
-            { $limit: limit },
-            {
-              $project: {
-                _id: 1,
-                studentId: 1,
-                studentName: 1,
-                admissionNumber: 1,
-                className: 1,
-                section: 1,
-                session: 1,
-                dueAmount: 1,
-                paidAmount: 1,
-                balance: 1,
-                dueDate: 1,
-                remarks: 1,
-                invoiceId: 1,
-                createdAt: 1,
-                updatedAt: 1,
-              },
-            },
-          ],
-          total: [{ $count: "count" }],
-        },
-      },
-    );
-
-    const agg = await PastFeeRecord.aggregate(pipeline);
-    const facet = agg[0] || { items: [], total: [] };
-    const total = facet.total[0]?.count || 0;
-
-    const items = (facet.items || []).map((i) => ({
+    const items = (rows || []).map((i) => ({
       _id: i._id,
       studentId: i.studentId,
       studentName: i.studentName,
@@ -650,15 +607,26 @@ export const listPastFeeRecords = async (req, res, next) => {
 
 export const getStudentPastFeeSummary = async (req, res, next) => {
   try {
-    const schoolId = schoolIdMatchValue(req);
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
     const { studentId } = req.params;
 
-    const student = await Student.findOne({ _id: studentId, schoolId }).lean();
+    if (!mongoose.Types.ObjectId.isValid(studentId)) {
+      return fail(res, 400, "Invalid studentId");
+    }
+    const studentObjectId = new mongoose.Types.ObjectId(studentId);
+
+    const student = await Student.findOne({ _id: studentObjectId, schoolId }).lean();
     if (!student) return fail(res, 404, "Student not found");
 
+    const recordMatch = {
+      schoolId,
+      studentId: studentObjectId,
+      isDeleted: { $ne: true },
+    };
+
     const [agg] = await PastFeeRecord.aggregate([
-      { $match: { schoolId, studentId } },
+      { $match: recordMatch },
       {
         $group: {
           _id: null,
@@ -672,7 +640,7 @@ export const getStudentPastFeeSummary = async (req, res, next) => {
     const summaryBase = agg || { totalBilled: 0, totalPaid: 0, balance: 0 };
 
     const bySessionAgg = await PastFeeRecord.aggregate([
-      { $match: { schoolId, studentId } },
+      { $match: recordMatch },
       {
         $group: {
           _id: "$session",
@@ -702,7 +670,7 @@ export const getStudentPastFeeSummary = async (req, res, next) => {
 /** Edit a single past-fee record. Updates due/paid/balance, dates, remarks etc. */
 export const updatePastFeeRecord = async (req, res, next) => {
   try {
-    const schoolId = schoolIdMatchValue(req);
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
@@ -820,7 +788,7 @@ export const updatePastFeeRecord = async (req, res, next) => {
 /** Soft delete a past fee record. */
 export const softDeletePastFeeRecord = async (req, res, next) => {
   try {
-    const schoolId = schoolIdMatchValue(req);
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
@@ -855,7 +823,7 @@ export const softDeletePastFeeRecord = async (req, res, next) => {
 /** Restore a soft-deleted past fee record. */
 export const restorePastFeeRecord = async (req, res, next) => {
   try {
-    const schoolId = schoolIdMatchValue(req);
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
@@ -1036,7 +1004,7 @@ async function ensurePastFeeInvoice(record, schoolId, user) {
 /** Prepare WhatsApp message for past-fee due balance (student or parents). */
 export const preparePastFeeWhatsApp = async (req, res, next) => {
   try {
-    const schoolId = schoolIdMatchValue(req);
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
     if (!schoolId) return fail(res, 400, "School context missing");
 
@@ -1128,7 +1096,7 @@ export const preparePastFeeWhatsApp = async (req, res, next) => {
 /** Record a payment on a past-fee row and create/update the linked fee invoice. */
 export const recordPastFeePayment = async (req, res, next) => {
   try {
-    const schoolId = schoolIdMatchValue(req);
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
     if (!schoolId) return fail(res, 400, "School context missing");
 
     const record = await PastFeeRecord.findOne({
