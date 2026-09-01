@@ -53,6 +53,15 @@ export const ASSIGNABLE_SECTION_IDS = [
   "ac-fee-history",
   // Inventory
   "inv-items",
+  // Transport
+  "tr-dashboard",
+  "tr-buses",
+  "tr-drivers",
+  "tr-conductors",
+  "tr-routes",
+  "tr-bus-routes",
+  "tr-staff-assign",
+  "tr-students",
 ];
 
 export const ASSIGNABLE_SECTION_SET = new Set(ASSIGNABLE_SECTION_IDS);
