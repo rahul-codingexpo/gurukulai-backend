@@ -521,7 +521,9 @@ export const getExamStudents = async (req, res, next) => {
     }
 
     const students = await Student.find(studentFilter)
-      .select("name admissionNumber rollNumber className section documents.studentPhoto")
+      .select(
+        "name admissionNumber rollNumber className section dob parents.father.name parents.mother.name documents.studentPhoto",
+      )
       .sort({ section: 1, rollNumber: 1, admissionNumber: 1, name: 1 })
       .lean();
 

@@ -28,6 +28,7 @@ export const ASSIGNABLE_SECTION_IDS = [
   "sa-exam-setup",
   "sa-exam-program",
   "sa-admit-card",
+  "sa-exam-attendance",
   "sa-marksheet",
   // Student
   "st-dashboard",

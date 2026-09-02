@@ -481,7 +481,7 @@ export const createAdmission = async (req, res, next) => {
       schoolId,
       name,
       gender,
-      dob,
+      dob: toOptionalDate(dob),
       phone,
       admissionNumber,
       rollNumber,

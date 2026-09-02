@@ -32,10 +32,27 @@ export const roundMoney = (n) => Math.round(Number(n) * 100) / 100;
 
 /**
  * Request body `amount` is the base (pre-discount) amount.
+ * When `options.discountAmount` is set, that fixed ₹ value is deducted from base
+ * (avoids decimal drift from percent round-trip). Otherwise uses discountPercent.
  * Returns final payable in `amount`, plus discount breakdown.
  */
-export const computeInvoiceAmounts = (baseAmount, discountPercent = 0) => {
+export const computeInvoiceAmounts = (baseAmount, discountPercent = 0, options = {}) => {
   const base = roundMoney(baseAmount);
+
+  if (options.discountAmount != null && options.discountAmount !== "") {
+    const discountAmount = roundMoney(
+      Math.min(base, Math.max(0, Number(options.discountAmount) || 0)),
+    );
+    const finalAmount = roundMoney(base - discountAmount);
+    const pct = base > 0 ? roundMoney((discountAmount / base) * 100) : 0;
+    return {
+      baseAmount: base,
+      discountPercent: pct,
+      discountAmount,
+      amount: finalAmount,
+    };
+  }
+
   const pct = Math.min(100, Math.max(0, Number(discountPercent) || 0));
   const discountAmount = roundMoney(base * (pct / 100));
   const finalAmount = roundMoney(base - discountAmount);
@@ -155,6 +172,7 @@ export const createInvoice = async (req, res, next) => {
       period,
       remarks,
       discountPercent = 0,
+      discountAmount: discountAmountBody,
       status: requestedStatus,
       paidAmount,
       paid: paidFromBody,
@@ -172,13 +190,25 @@ export const createInvoice = async (req, res, next) => {
         message: "discountPercent must be between 0 and 100",
       });
     }
+    if (discountAmountBody != null && discountAmountBody !== "") {
+      const disc = Number(discountAmountBody);
+      if (Number.isNaN(disc) || disc < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "discountAmount must be 0 or greater",
+        });
+      }
+    }
     if (Number(amount) < 0) {
       return res.status(400).json({
         success: false,
         message: "amount (base before discount) must be 0 or greater",
       });
     }
-    const computed = computeInvoiceAmounts(amount, pct);
+    const computed =
+      discountAmountBody != null && discountAmountBody !== ""
+        ? computeInvoiceAmounts(amount, pct, { discountAmount: discountAmountBody })
+        : computeInvoiceAmounts(amount, pct);
     if (computed.amount < 0) {
       return res.status(400).json({
         success: false,
@@ -895,13 +925,14 @@ export const updateInvoice = async (req, res, next) => {
     const beforeSnap = await populateInvoice(
       FeeInvoice.findById(invoice._id),
     ).lean();
-    const { amount, baseAmount, dueDate, period, remarks, status, discountPercent } =
+    const { amount, baseAmount, dueDate, period, remarks, status, discountPercent, discountAmount } =
       req.body || {};
 
     const hasPricingUpdate =
       baseAmount !== undefined ||
       amount !== undefined ||
-      discountPercent !== undefined;
+      discountPercent !== undefined ||
+      discountAmount !== undefined;
 
     if (hasPricingUpdate) {
       const prevBase =
@@ -925,8 +956,20 @@ export const updateInvoice = async (req, res, next) => {
           message: "discountPercent must be between 0 and 100",
         });
       }
+      if (discountAmount !== undefined && discountAmount !== null && discountAmount !== "") {
+        const disc = Number(discountAmount);
+        if (Number.isNaN(disc) || disc < 0) {
+          return res.status(400).json({
+            success: false,
+            message: "discountAmount must be 0 or greater",
+          });
+        }
+      }
 
-      const computed = computeInvoiceAmounts(base, pct);
+      const computed =
+        discountAmount !== undefined && discountAmount !== null && discountAmount !== ""
+          ? computeInvoiceAmounts(base, pct, { discountAmount })
+          : computeInvoiceAmounts(base, pct);
       if (computed.amount < 0) {
         return res.status(400).json({
           success: false,

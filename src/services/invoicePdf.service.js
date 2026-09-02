@@ -157,7 +157,7 @@ export async function buildInvoicePdfBuffer({
     .map((p) => p.trim())
     .filter(Boolean)
     .join(", ");
-  const recognition = sch.runUnder || (sch.affiliation ? `Affiliated to ${sch.affiliation}` : "");
+  const recognition = sch.runUnder || "";
   const serialNo = String(primary.invoiceNumber || "").replace(/^INV-/i, "") || "—";
 
   const normalizedLines = lines.map((row) => ({
@@ -224,13 +224,6 @@ export async function buildInvoicePdfBuffer({
     y = doc.y + 2;
     if (recognition) {
       doc.font("Times-Bold").fontSize(11).text(recognition, pageLeft, y, {
-        width: contentWidth,
-        align: "center",
-      });
-      y = doc.y + 1;
-    }
-    if (sch.affiliation && sch.runUnder) {
-      doc.font("Times-Bold").fontSize(10).text(String(sch.affiliation), pageLeft, y, {
         width: contentWidth,
         align: "center",
       });

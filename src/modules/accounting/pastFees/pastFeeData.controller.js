@@ -44,6 +44,51 @@ const getRowValue = (row, normalizedKey, keyMap) => {
   return row[actualKey];
 };
 
+/** Excel serial (days since 1899-12-30) → UTC date-only. */
+const excelSerialToDate = (serial) => {
+  const n = Number(serial);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const utcDays = Math.floor(n - 25569);
+  const d = new Date(utcDays * 86400000);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
+
+const isLikelyExcelSerial = (num, str) => {
+  if (!Number.isFinite(num) || num <= 0) return false;
+  const raw = String(str ?? num).trim();
+  if (/^\d{4}$/.test(raw) && num >= 1900 && num <= 2100) return false;
+  return num < 1_000_000;
+};
+
+/** Fix dates stored when an Excel serial was parsed as a calendar year (e.g. 46060 → 2026). */
+const normalizeDueDate = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "number" && isLikelyExcelSerial(value, value)) {
+    return excelSerialToDate(value);
+  }
+
+  const s = String(value).trim();
+  if (!s) return null;
+
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const num = Number(s);
+    if (isLikelyExcelSerial(num, s)) {
+      return excelSerialToDate(num);
+    }
+  }
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const year = d.getUTCFullYear();
+  if (year > 2500) {
+    return excelSerialToDate(year);
+  }
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
+
 const parseDateOnly = (value) => {
   if (value === undefined || value === null || value === "") return null;
   const s = String(value).trim();
@@ -55,6 +100,9 @@ const parseDateOnly = (value) => {
     return dt;
   }
 
+  const normalized = normalizeDueDate(value);
+  if (normalized) return normalized;
+
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return null;
   d.setUTCHours(0, 0, 0, 0);
@@ -62,9 +110,8 @@ const parseDateOnly = (value) => {
 };
 
 const toISODateOnly = (value) => {
-  if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
+  const d = normalizeDueDate(value);
+  if (!d) return null;
   return d.toISOString().slice(0, 10);
 };
 
@@ -575,6 +622,26 @@ export const listPastFeeRecords = async (req, res, next) => {
         .lean(),
     ]);
 
+    const repairOps = [];
+    for (const row of rows || []) {
+      if (!row?.dueDate) continue;
+      const orig = new Date(row.dueDate);
+      if (Number.isNaN(orig.getTime()) || orig.getUTCFullYear() <= 2500) continue;
+      const fixed = normalizeDueDate(row.dueDate);
+      if (fixed && fixed.getTime() !== orig.getTime()) {
+        repairOps.push({
+          updateOne: {
+            filter: { _id: row._id },
+            update: { $set: { dueDate: fixed } },
+          },
+        });
+        row.dueDate = fixed;
+      }
+    }
+    if (repairOps.length) {
+      await PastFeeRecord.bulkWrite(repairOps, { ordered: false });
+    }
+
     const items = (rows || []).map((i) => ({
       _id: i._id,
       studentId: i.studentId,
@@ -859,8 +926,9 @@ const formatInrPlain = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 const formatDueDateLong = (d) => {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", {
+  const normalized = normalizeDueDate(d);
+  if (!normalized) return "—";
+  return normalized.toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -1049,14 +1117,23 @@ export const preparePastFeeWhatsApp = async (req, res, next) => {
         ? `Dear ${student.name || record.studentName || "Student"},`
         : "Dear Parent/Guardian,";
 
+    const closingLine =
+      Number(record.balance) <= 0
+        ? "This fee record is marked as paid. Please contact the school if you need any clarification."
+        : "Kindly clear the outstanding balance at the earliest.";
+
     const message = [
       `*Past Fee Dues — ${schoolName}*`,
       "",
       greeting,
       "",
       resolved.recipient === "student"
-        ? "Please find your pending past fee details below."
-        : `Please find the pending past fee details for *${student.name || record.studentName || "Student"}*.`,
+        ? Number(record.balance) <= 0
+          ? "Please find your past fee details below."
+          : "Please find your pending past fee details below."
+        : Number(record.balance) <= 0
+          ? `Please find the past fee details for *${student.name || record.studentName || "Student"}*.`
+          : `Please find the pending past fee details for *${student.name || record.studentName || "Student"}*.`,
       "",
       `*Admission No:* ${record.admissionNumber || student.admissionNumber || "—"}`,
       `*Class:* ${classSection}`,
@@ -1068,7 +1145,7 @@ export const preparePastFeeWhatsApp = async (req, res, next) => {
       `*Due Date:* ${formatDueDateLong(record.dueDate)}`,
       record.remarks ? `*Remarks:* ${record.remarks}` : null,
       "",
-      "Kindly clear the outstanding balance at the earliest.",
+      closingLine,
       "",
       "Thank you.",
     ]
