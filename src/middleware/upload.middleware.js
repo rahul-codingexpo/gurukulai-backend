@@ -150,5 +150,11 @@ export const uploadStaffDocuments = createSpacesUpload({
   limits: { fileSize: TEN_MB },
 });
 
+export const uploadTransportPhoto = createSpacesUpload({
+  folder: "uploads/transport",
+  fileFilter,
+  limits: { fileSize: TEN_MB },
+});
+
 export default upload;
 

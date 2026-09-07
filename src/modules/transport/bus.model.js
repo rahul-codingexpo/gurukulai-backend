@@ -17,7 +17,19 @@ const busSchema = new Schema(
     busType: { type: String, default: "", trim: true },
     seatingCapacity: { type: Number, required: true, min: 1 },
     model: { type: String, default: "", trim: true },
+    /** Primary photo — number plate view (required on create). */
     photoUrl: { type: String, default: "" },
+    /** Optional additional bus photos (max 4). */
+    additionalPhotos: {
+      type: [{ type: String, trim: true }],
+      default: [],
+      validate: {
+        validator(arr) {
+          return !arr || arr.length <= 4;
+        },
+        message: "At most 4 additional photos are allowed",
+      },
+    },
     fitnessValidTill: { type: Date, default: null },
     insuranceExpiryDate: { type: Date, default: null },
     permitExpiryDate: { type: Date, default: null },

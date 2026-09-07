@@ -2,6 +2,7 @@ import express from "express";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
 import { injectSchool } from "../../middleware/injectSchool.middleware.js";
+import { uploadTransportPhoto } from "../../middleware/upload.middleware.js";
 import {
   listBuses,
   createBus,
@@ -47,19 +48,35 @@ const transportAuth = [
 router.get("/dashboard", ...transportAuth, getTransportDashboard);
 
 router.get("/buses", ...transportAuth, listBuses);
-router.post("/buses", ...transportAuth, createBus);
-router.put("/buses/:id", ...transportAuth, updateBus);
+router.post(
+  "/buses",
+  ...transportAuth,
+  uploadTransportPhoto.fields([
+    { name: "numberPlatePhoto", maxCount: 1 },
+    { name: "additionalPhotos", maxCount: 4 },
+  ]),
+  createBus,
+);
+router.put(
+  "/buses/:id",
+  ...transportAuth,
+  uploadTransportPhoto.fields([
+    { name: "numberPlatePhoto", maxCount: 1 },
+    { name: "additionalPhotos", maxCount: 4 },
+  ]),
+  updateBus,
+);
 router.post("/buses/:id/deactivate", ...transportAuth, deactivateBus);
 router.get("/buses/:id/students", ...transportAuth, listBusStudents);
 
 router.get("/drivers", ...transportAuth, listDrivers);
-router.post("/drivers", ...transportAuth, createDriver);
-router.put("/drivers/:id", ...transportAuth, updateDriver);
+router.post("/drivers", ...transportAuth, uploadTransportPhoto.single("photo"), createDriver);
+router.put("/drivers/:id", ...transportAuth, uploadTransportPhoto.single("photo"), updateDriver);
 router.post("/drivers/:id/deactivate", ...transportAuth, deactivateDriver);
 
 router.get("/conductors", ...transportAuth, listConductors);
-router.post("/conductors", ...transportAuth, createConductor);
-router.put("/conductors/:id", ...transportAuth, updateConductor);
+router.post("/conductors", ...transportAuth, uploadTransportPhoto.single("photo"), createConductor);
+router.put("/conductors/:id", ...transportAuth, uploadTransportPhoto.single("photo"), updateConductor);
 router.post("/conductors/:id/deactivate", ...transportAuth, deactivateConductor);
 
 router.get("/routes", ...transportAuth, listRoutes);

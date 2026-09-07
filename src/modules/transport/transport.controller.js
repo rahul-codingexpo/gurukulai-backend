@@ -19,8 +19,57 @@ import {
   nextSequentialCode,
   studentSnapshotFromDoc,
 } from "./transport.util.js";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const notDeleted = { isDeleted: { $ne: true } };
+
+const resolveUploadedPhotoUrl = (req, fallback = "") => {
+  if (req.file) {
+    const url = uploadedFileUrl(req.file);
+    if (url) return url;
+  }
+  return String(fallback || "").trim();
+};
+
+const getUploadedFiles = (req, field) => {
+  const files = req.files?.[field];
+  return Array.isArray(files) ? files : [];
+};
+
+const parseBool = (value) => value === true || value === "true" || value === "1" || value === 1;
+
+const parseKeptPhotoList = (raw) => {
+  if (raw == null || raw === "") return null;
+  if (Array.isArray(raw)) return raw.map((x) => String(x || "").trim()).filter(Boolean);
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (Array.isArray(parsed)) {
+      return parsed.map((x) => String(x || "").trim()).filter(Boolean);
+    }
+  } catch {
+    // ignore
+  }
+  return String(raw)
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+};
+
+const replacePhotoIfUploaded = async (req, doc) => {
+  if (!req.file || !doc) return;
+  const nextUrl = uploadedFileUrl(req.file);
+  if (!nextUrl) return;
+  const previous = doc.photoUrl;
+  doc.photoUrl = nextUrl;
+  if (previous && previous !== nextUrl) {
+    try {
+      await deleteFromSpacesByUrl(previous);
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+};
 
 const requireSchool = (req, res) => {
   const schoolId = toObjectId(resolveSchoolId(req));
@@ -67,6 +116,19 @@ export const createBus = async (req, res, next) => {
     if (!Number.isFinite(seatingCapacity) || seatingCapacity < 1) {
       return fail(res, 400, "seatingCapacity must be at least 1");
     }
+
+    const numberPlateFile = getUploadedFiles(req, "numberPlatePhoto")[0];
+    const numberPlatePhotoUrl =
+      uploadedFileUrl(numberPlateFile) || String(body.photoUrl || "").trim();
+    if (!numberPlatePhotoUrl) {
+      return fail(res, 400, "Number plate photo is required");
+    }
+
+    const additionalFromUpload = getUploadedFiles(req, "additionalPhotos")
+      .map((f) => uploadedFileUrl(f))
+      .filter(Boolean)
+      .slice(0, 4);
+
     const busCode = await nextSequentialCode(TransportBus, schoolId, "BUS", "busCode");
     const doc = await TransportBus.create({
       schoolId,
@@ -77,11 +139,12 @@ export const createBus = async (req, res, next) => {
       busType: String(body.busType || "").trim(),
       seatingCapacity,
       model: String(body.model || "").trim(),
-      photoUrl: String(body.photoUrl || "").trim(),
+      photoUrl: numberPlatePhotoUrl,
+      additionalPhotos: additionalFromUpload,
       fitnessValidTill: parseDateOnly(body.fitnessValidTill),
       insuranceExpiryDate: parseDateOnly(body.insuranceExpiryDate),
       permitExpiryDate: parseDateOnly(body.permitExpiryDate),
-      gpsAvailable: Boolean(body.gpsAvailable),
+      gpsAvailable: parseBool(body.gpsAvailable),
       gpsDeviceId: String(body.gpsDeviceId || "").trim(),
       status: normalizeStatus(body.status),
       remarks: String(body.remarks || "").trim(),
@@ -102,7 +165,7 @@ export const updateBus = async (req, res, next) => {
     if (!bus) return fail(res, 404, "Bus not found");
     const body = req.body || {};
     const fields = [
-      "busIdentity", "busName", "registrationNumber", "busType", "model", "photoUrl",
+      "busIdentity", "busName", "registrationNumber", "busType", "model",
       "gpsDeviceId", "remarks",
     ];
     fields.forEach((f) => {
@@ -113,11 +176,56 @@ export const updateBus = async (req, res, next) => {
       if (!Number.isFinite(cap) || cap < 1) return fail(res, 400, "Invalid seatingCapacity");
       bus.seatingCapacity = cap;
     }
-    if (body.gpsAvailable !== undefined) bus.gpsAvailable = Boolean(body.gpsAvailable);
+    if (body.gpsAvailable !== undefined) bus.gpsAvailable = parseBool(body.gpsAvailable);
     if (body.status !== undefined) bus.status = normalizeStatus(body.status);
     if (body.fitnessValidTill !== undefined) bus.fitnessValidTill = parseDateOnly(body.fitnessValidTill);
     if (body.insuranceExpiryDate !== undefined) bus.insuranceExpiryDate = parseDateOnly(body.insuranceExpiryDate);
     if (body.permitExpiryDate !== undefined) bus.permitExpiryDate = parseDateOnly(body.permitExpiryDate);
+
+    const numberPlateFile = getUploadedFiles(req, "numberPlatePhoto")[0];
+    if (numberPlateFile) {
+      const nextUrl = uploadedFileUrl(numberPlateFile);
+      if (nextUrl) {
+        const previous = bus.photoUrl;
+        bus.photoUrl = nextUrl;
+        if (previous && previous !== nextUrl) {
+          try {
+            await deleteFromSpacesByUrl(previous);
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } else if (body.photoUrl !== undefined) {
+      bus.photoUrl = String(body.photoUrl || "").trim();
+    }
+
+    if (!bus.photoUrl) {
+      return fail(res, 400, "Number plate photo is required");
+    }
+
+    const newAdditional = getUploadedFiles(req, "additionalPhotos")
+      .map((f) => uploadedFileUrl(f))
+      .filter(Boolean);
+    const kept = parseKeptPhotoList(body.keepAdditionalPhotos);
+    if (kept !== null || newAdditional.length) {
+      const previous = Array.isArray(bus.additionalPhotos) ? [...bus.additionalPhotos] : [];
+      const base = kept !== null ? kept : previous;
+      const nextPhotos = [...base, ...newAdditional]
+        .map((u) => String(u || "").trim())
+        .filter(Boolean)
+        .slice(0, 4);
+      const removed = previous.filter((u) => !nextPhotos.includes(u));
+      for (const url of removed) {
+        try {
+          await deleteFromSpacesByUrl(url);
+        } catch {
+          // ignore
+        }
+      }
+      bus.additionalPhotos = nextPhotos;
+    }
+
     await bus.save();
     return ok(res, { data: bus, message: "Bus updated" });
   } catch (err) {
@@ -170,7 +278,7 @@ export const createDriver = async (req, res, next) => {
       driverCode,
       name,
       mobile,
-      photoUrl: String(body.photoUrl || "").trim(),
+      photoUrl: resolveUploadedPhotoUrl(req, body.photoUrl),
       alternateMobile: String(body.alternateMobile || "").trim(),
       address: String(body.address || "").trim(),
       licenceNumber: String(body.licenceNumber || "").trim(),
@@ -199,12 +307,14 @@ export const updateDriver = async (req, res, next) => {
     if (!driver) return fail(res, 404, "Driver not found");
     const body = req.body || {};
     const fields = [
-      "name", "mobile", "alternateMobile", "address", "photoUrl", "licenceNumber",
+      "name", "mobile", "alternateMobile", "address", "licenceNumber",
       "licenceType", "experience", "emergencyContactName", "emergencyContactNumber", "remarks",
     ];
     fields.forEach((f) => {
       if (body[f] !== undefined) driver[f] = String(body[f]).trim();
     });
+    if (body.photoUrl !== undefined && !req.file) driver.photoUrl = String(body.photoUrl || "").trim();
+    await replacePhotoIfUploaded(req, driver);
     if (body.status !== undefined) driver.status = normalizeStatus(body.status);
     if (body.licenceIssueDate !== undefined) driver.licenceIssueDate = parseDateOnly(body.licenceIssueDate);
     if (body.licenceExpiryDate !== undefined) driver.licenceExpiryDate = parseDateOnly(body.licenceExpiryDate);
@@ -260,7 +370,7 @@ export const createConductor = async (req, res, next) => {
       conductorCode,
       name,
       mobile,
-      photoUrl: String(body.photoUrl || "").trim(),
+      photoUrl: resolveUploadedPhotoUrl(req, body.photoUrl),
       alternateMobile: String(body.alternateMobile || "").trim(),
       address: String(body.address || "").trim(),
       idProofNumber: String(body.idProofNumber || "").trim(),
@@ -286,12 +396,14 @@ export const updateConductor = async (req, res, next) => {
     if (!conductor) return fail(res, 404, "Conductor not found");
     const body = req.body || {};
     const fields = [
-      "name", "mobile", "alternateMobile", "address", "photoUrl", "idProofNumber",
+      "name", "mobile", "alternateMobile", "address", "idProofNumber",
       "experience", "emergencyContactName", "emergencyContactNumber", "remarks",
     ];
     fields.forEach((f) => {
       if (body[f] !== undefined) conductor[f] = String(body[f]).trim();
     });
+    if (body.photoUrl !== undefined && !req.file) conductor.photoUrl = String(body.photoUrl || "").trim();
+    await replacePhotoIfUploaded(req, conductor);
     if (body.status !== undefined) conductor.status = normalizeStatus(body.status);
     if (body.joiningDate !== undefined) conductor.joiningDate = parseDateOnly(body.joiningDate);
     await conductor.save();
