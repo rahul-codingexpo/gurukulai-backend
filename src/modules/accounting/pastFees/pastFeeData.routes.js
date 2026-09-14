@@ -17,6 +17,7 @@ import {
   restorePastFeeRecord,
   preparePastFeeWhatsApp,
   recordPastFeePayment,
+  createInvoiceFromPastFee,
 } from "./pastFeeData.controller.js";
 
 const router = express.Router();
@@ -128,6 +129,17 @@ router.post(
   injectSchool,
   injectBranchSchoolScope,
   recordPastFeePayment,
+);
+
+// Create invoice from past due (no payment) — for bundling with new fee invoices
+router.post(
+  "/accounting/past-fees/:id/create-invoice",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  injectBranchSchoolScope,
+  createInvoiceFromPastFee,
 );
 
 // Endpoint 6: Edit a single past fee record

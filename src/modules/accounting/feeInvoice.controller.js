@@ -991,8 +991,49 @@ export const updateInvoice = async (req, res, next) => {
     if (dueDate !== undefined) invoice.dueDate = new Date(dueDate);
     if (period !== undefined) invoice.period = String(period).trim();
     if (remarks !== undefined) invoice.remarks = String(remarks).trim();
+
+    const { paidAmount, paid: paidFromBody } = req.body || {};
+    const requestedPaidRaw = paidAmount != null ? paidAmount : paidFromBody;
+    if (requestedPaidRaw !== undefined && requestedPaidRaw !== null && requestedPaidRaw !== "") {
+      const nextPaid = roundMoney(Number(requestedPaidRaw));
+      if (Number.isNaN(nextPaid) || nextPaid < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "paidAmount must be 0 or greater",
+        });
+      }
+      const payable = Number(invoice.amount) || 0;
+      if (nextPaid > payable) {
+        return res.status(400).json({
+          success: false,
+          message: `paidAmount cannot exceed invoice amount (₹${payable})`,
+        });
+      }
+      invoice.paid = nextPaid;
+      if (payable > 0 && nextPaid >= payable) {
+        invoice.status = "Paid";
+        invoice.paidDate = invoice.paidDate || new Date();
+      } else if (payable > 0 && nextPaid > 0) {
+        invoice.status = "Partial";
+        invoice.paidDate = invoice.paidDate || new Date();
+      } else {
+        invoice.paidDate = null;
+        if (status === undefined) {
+          invoice.status =
+            invoice.dueDate && invoice.dueDate < new Date() ? "Overdue" : "Pending";
+        }
+      }
+    }
+
     if (status !== undefined && ["Pending", "Overdue", "Partial", "Paid", "Cancelled"].includes(status)) {
       invoice.status = status;
+      if (status === "Paid") {
+        const payable = Number(invoice.amount) || 0;
+        if (payable > 0 && (Number(invoice.paid) || 0) < payable) {
+          invoice.paid = payable;
+        }
+        if (!invoice.paidDate) invoice.paidDate = new Date();
+      }
     }
     const amt = Number(invoice.amount) || 0;
     const paidAmt = Number(invoice.paid) || 0;

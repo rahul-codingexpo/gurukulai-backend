@@ -62,9 +62,45 @@ const isLikelyExcelSerial = (num, str) => {
   return num < 1_000_000;
 };
 
-/** Fix dates stored when an Excel serial was parsed as a calendar year (e.g. 46060 → 2026). */
-const normalizeDueDate = (value) => {
+/** 2-digit year → full year (school fees: 00–69 → 2000+, 70–99 → 1900+). */
+const expandYear = (year) => {
+  const y = Number(year);
+  if (!Number.isFinite(y)) return null;
+  if (y >= 100) return y;
+  return y <= 69 ? 2000 + y : 1900 + y;
+};
+
+/** Build a UTC date-only from day/month/year; rejects invalid calendar dates. */
+const dateFromDmy = (day, month, year) => {
+  const d = Number(day);
+  const m = Number(month);
+  const y = expandYear(year);
+  if (!Number.isFinite(d) || !Number.isFinite(m) || !Number.isFinite(y)) return null;
+  if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (
+    Number.isNaN(dt.getTime()) ||
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== m - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return null;
+  }
+  return dt;
+};
+
+/**
+ * Parse due dates for Indian uploads: prefer DD/MM/YYYY (also DD-MM-YYYY, DD.MM.YYYY).
+ * Never use `new Date("dd/mm/yyyy")` — that is locale/US MM/DD and blanks days > 12.
+ */
+const parseDateOnly = (value) => {
   if (value === undefined || value === null || value === "") return null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // SheetJS / Excel Date cells are usually local midnight — use local Y/M/D.
+    return dateFromDmy(value.getDate(), value.getMonth() + 1, value.getFullYear());
+  }
+
   if (typeof value === "number" && isLikelyExcelSerial(value, value)) {
     return excelSerialToDate(value);
   }
@@ -74,39 +110,43 @@ const normalizeDueDate = (value) => {
 
   if (/^\d+(\.\d+)?$/.test(s)) {
     const num = Number(s);
-    if (isLikelyExcelSerial(num, s)) {
-      return excelSerialToDate(num);
-    }
+    if (isLikelyExcelSerial(num, s)) return excelSerialToDate(num);
   }
 
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  const year = d.getUTCFullYear();
-  if (year > 2500) {
-    return excelSerialToDate(year);
+  // ISO / HTML date input: YYYY-MM-DD (optional time)
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (iso) return dateFromDmy(iso[3], iso[2], iso[1]);
+
+  // DD/MM/YYYY | DD-MM-YYYY | DD.MM.YYYY | with 2-digit year
+  const dmy = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})(?:\s+.*)?$/);
+  if (dmy) {
+    const a = Number(dmy[1]);
+    const b = Number(dmy[2]);
+    const y = dmy[3];
+    // Unambiguous: first part is day when > 12
+    if (a > 12 && b >= 1 && b <= 12) return dateFromDmy(a, b, y);
+    // Unambiguous: second part is day when > 12 (rare MM/DD typed data)
+    if (b > 12 && a >= 1 && a <= 12) return dateFromDmy(b, a, y);
+    // Ambiguous (both <= 12): Indian past-fee uploads use DD/MM
+    return dateFromDmy(a, b, y);
   }
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
+
+  return null;
 };
 
-const parseDateOnly = (value) => {
+/** Normalize stored/API due dates (ISO, Excel serial, or DD/MM text). */
+const normalizeDueDate = (value) => {
   if (value === undefined || value === null || value === "") return null;
-  const s = String(value).trim();
-  if (!s) return null;
+  const parsed = parseDateOnly(value);
+  if (parsed) return parsed;
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const dt = new Date(`${s}T00:00:00.000Z`);
-    if (Number.isNaN(dt.getTime())) return null;
-    return dt;
+  // Legacy salvage: Excel serial wrongly stored as a huge "year" via Date parsing
+  const d = value instanceof Date ? value : new Date(value);
+  if (!Number.isNaN(d.getTime())) {
+    const year = d.getUTCFullYear();
+    if (year > 2500) return excelSerialToDate(year);
   }
-
-  const normalized = normalizeDueDate(value);
-  if (normalized) return normalized;
-
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return null;
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
+  return null;
 };
 
 const toISODateOnly = (value) => {
@@ -1266,6 +1306,59 @@ export const recordPastFeePayment = async (req, res, next) => {
         record: serializePastFee(record),
         invoice: invPopulated,
         payment: await Payment.findById(payment._id).populate("receivedBy", "name"),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** Create (or return) a Fee Invoice linked to a past-fee due — without recording payment. */
+export const createInvoiceFromPastFee = async (req, res, next) => {
+  try {
+    const schoolId = normalizeSchoolIdForQuery(schoolIdMatchValue(req));
+    if (!schoolId) return fail(res, 400, "School context missing");
+
+    const record = await PastFeeRecord.findOne({
+      _id: req.params.id,
+      schoolId,
+      isDeleted: { $ne: true },
+    });
+    if (!record) return fail(res, 404, "Past fee record not found");
+
+    const balance = roundMoney(record.balance);
+    if (balance <= 0) {
+      return fail(res, 400, "This past fee record has no outstanding balance");
+    }
+
+    const campusSchoolId = record.schoolId;
+    const invoice = await ensurePastFeeInvoice(record, campusSchoolId, req.user);
+
+    const body = req.body || {};
+    let changed = false;
+    if (body.period !== undefined) {
+      invoice.period = String(body.period || "").trim();
+      changed = true;
+    }
+    if (body.dueDate) {
+      const d = parseDateOnly(body.dueDate);
+      if (d) {
+        invoice.dueDate = d;
+        changed = true;
+      }
+    }
+    if (changed) await invoice.save();
+
+    const invPopulated = await FeeInvoice.findById(invoice._id)
+      .populate("studentId", "name admissionNumber className section rollNumber")
+      .populate("feeTypeId", "name code");
+
+    return res.status(201).json({
+      success: true,
+      message: "Past dues added as fee invoice",
+      data: {
+        record: serializePastFee(record),
+        invoice: invPopulated,
       },
     });
   } catch (err) {
