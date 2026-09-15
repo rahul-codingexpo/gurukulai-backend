@@ -59,7 +59,8 @@ const isLikelyExcelSerial = (num, str) => {
   if (!Number.isFinite(num) || num <= 0) return false;
   const raw = String(str ?? num).trim();
   if (/^\d{4}$/.test(raw) && num >= 1900 && num <= 2100) return false;
-  return num < 1_000_000;
+  // Excel date serials for ~1900–2100 are roughly 1..80000
+  return num > 20000 && num < 100000;
 };
 
 /** 2-digit year → full year (school fees: 00–69 → 2000+, 70–99 → 1900+). */
@@ -89,46 +90,89 @@ const dateFromDmy = (day, month, year) => {
   return dt;
 };
 
+const looksLikeDmyDateText = (value) => {
+  const s = String(value || "").trim();
+  if (!s) return false;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return true;
+  return /^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}/.test(s);
+};
+
 /**
- * Parse due dates for Indian uploads: prefer DD/MM/YYYY (also DD-MM-YYYY, DD.MM.YYYY).
- * Never use `new Date("dd/mm/yyyy")` — that is locale/US MM/DD and blanks days > 12.
+ * Parse due-date text as Indian DD/MM/YYYY (also DD-MM-YYYY, DD.MM.YYYY).
+ * Never use `new Date("dd/mm/yyyy")` — that uses US MM/DD and swaps days 1–12.
+ */
+const parseDmyDateText = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const s = String(value).trim();
+  if (!s) return null;
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (iso) return dateFromDmy(iso[3], iso[2], iso[1]);
+
+  const dmy = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})(?:\s+.*)?$/);
+  if (!dmy) return null;
+
+  const a = Number(dmy[1]);
+  const b = Number(dmy[2]);
+  const y = dmy[3];
+
+  // Always Indian DD/MM for past-fee uploads (do not accept MM/DD).
+  // Unambiguous day>12 still works; ambiguous 01–12 stays day-first.
+  if (b < 1 || b > 12) return null;
+  return dateFromDmy(a, b, y);
+};
+
+/**
+ * Excel often auto-converts typed DD/MM (e.g. 10/08/2026 = 10 Aug) as US MM/DD
+ * (10 Oct) when day≤12. Days>12 stay as text. Undo that swap for serials.
+ */
+const excelSerialToDateAssumingIndianDmy = (serial) => {
+  const stored = excelSerialToDate(serial);
+  if (!stored) return null;
+  const month = stored.getUTCMonth() + 1;
+  const day = stored.getUTCDate();
+  const year = stored.getUTCFullYear();
+  if (day <= 12 && month <= 12) {
+    const swapped = dateFromDmy(month, day, year);
+    if (swapped) return swapped;
+  }
+  return stored;
+};
+
+/**
+ * Parse due dates for Indian past-fee uploads.
+ * Prefer DD/MM text; Excel serials (days 1–12) often need day/month undo after US auto-convert.
  */
 const parseDateOnly = (value) => {
   if (value === undefined || value === null || value === "") return null;
 
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    // SheetJS / Excel Date cells are usually local midnight — use local Y/M/D.
-    return dateFromDmy(value.getDate(), value.getMonth() + 1, value.getFullYear());
+  // Pure text / formatted cell text — always DD/MM (never Date() / MM/DD)
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (!s) return null;
+    const fromText = parseDmyDateText(s);
+    if (fromText) return fromText;
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      const num = Number(s);
+      if (isLikelyExcelSerial(num, s)) return excelSerialToDateAssumingIndianDmy(num);
+    }
+    return null;
   }
 
   if (typeof value === "number" && isLikelyExcelSerial(value, value)) {
-    return excelSerialToDate(value);
+    return excelSerialToDateAssumingIndianDmy(value);
   }
 
-  const s = String(value).trim();
-  if (!s) return null;
-
-  if (/^\d+(\.\d+)?$/.test(s)) {
-    const num = Number(s);
-    if (isLikelyExcelSerial(num, s)) return excelSerialToDate(num);
-  }
-
-  // ISO / HTML date input: YYYY-MM-DD (optional time)
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
-  if (iso) return dateFromDmy(iso[3], iso[2], iso[1]);
-
-  // DD/MM/YYYY | DD-MM-YYYY | DD.MM.YYYY | with 2-digit year
-  const dmy = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})(?:\s+.*)?$/);
-  if (dmy) {
-    const a = Number(dmy[1]);
-    const b = Number(dmy[2]);
-    const y = dmy[3];
-    // Unambiguous: first part is day when > 12
-    if (a > 12 && b >= 1 && b <= 12) return dateFromDmy(a, b, y);
-    // Unambiguous: second part is day when > 12 (rare MM/DD typed data)
-    if (b > 12 && a >= 1 && a <= 12) return dateFromDmy(b, a, y);
-    // Ambiguous (both <= 12): Indian past-fee uploads use DD/MM
-    return dateFromDmy(a, b, y);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // Date cell without text: recover possible US MM/DD auto-convert
+    const month = value.getMonth() + 1;
+    const day = value.getDate();
+    const year = value.getFullYear();
+    if (day <= 12 && month <= 12) {
+      const swapped = dateFromDmy(month, day, year);
+      if (swapped) return swapped;
+    }
+    return dateFromDmy(day, month, year);
   }
 
   return null;
@@ -137,10 +181,21 @@ const parseDateOnly = (value) => {
 /** Normalize stored/API due dates (ISO, Excel serial, or DD/MM text). */
 const normalizeDueDate = (value) => {
   if (value === undefined || value === null || value === "") return null;
+
+  // Stored API values are ISO YYYY-MM-DD — do not apply Excel day/month swap.
+  if (typeof value === "string") {
+    const s = value.trim();
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+    if (iso) return dateFromDmy(iso[3], iso[2], iso[1]);
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // DB Date: trust calendar components in UTC (we store UTC midnight)
+    return dateFromDmy(value.getUTCDate(), value.getUTCMonth() + 1, value.getUTCFullYear());
+  }
+
   const parsed = parseDateOnly(value);
   if (parsed) return parsed;
 
-  // Legacy salvage: Excel serial wrongly stored as a huge "year" via Date parsing
   const d = value instanceof Date ? value : new Date(value);
   if (!Number.isNaN(d.getTime())) {
     const year = d.getUTCFullYear();
@@ -157,28 +212,66 @@ const toISODateOnly = (value) => {
 
 const parseNumber = (v) => {
   if (v === undefined || v === null || v === "") return null;
-  const n = Number(v);
+  const n = Number(String(v).replace(/,/g, "").trim());
   if (Number.isNaN(n)) return null;
   return n;
 };
 
+/**
+ * Read upload rows. For DueDate column, prefer Excel formatted text (cell.w)
+ * so DD/MM values are not lost to US locale serial conversion.
+ */
 const parseRowsFromUpload = (file) => {
   const ext = (file.originalname || "").toLowerCase().split(".").pop();
   const buffer = file.buffer;
   if (!buffer) throw new Error("File buffer missing");
 
-  if (ext === "csv") {
-    const text = buffer.toString("utf8");
-    const wb = XLSX.read(text, { type: "string" });
-    const sheetName = wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
-    return XLSX.utils.sheet_to_json(sheet, { defval: "" });
-  }
+  const wb =
+    ext === "csv"
+      ? XLSX.read(buffer.toString("utf8"), { type: "string", cellText: true, cellDates: false })
+      : XLSX.read(buffer, { type: "buffer", cellText: true, cellDates: false });
 
-  const wb = XLSX.read(buffer, { type: "buffer" });
   const sheetName = wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
-  return XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+  if (!rows.length || !sheet["!ref"]) return rows;
+
+  const range = XLSX.utils.decode_range(sheet["!ref"]);
+  let dueDateCol = -1;
+  let dueDateHeader = null;
+  for (let C = range.s.c; C <= range.e.c; C += 1) {
+    const headerCell = sheet[XLSX.utils.encode_cell({ r: range.s.r, c: C })];
+    const headerName = String(headerCell?.w ?? headerCell?.v ?? "").trim();
+    if (normalizeHeader(headerName) === "duedate") {
+      dueDateCol = C;
+      dueDateHeader = headerName;
+      break;
+    }
+  }
+  if (dueDateCol < 0 || !dueDateHeader) return rows;
+
+  for (let R = range.s.r + 1; R <= range.e.r; R += 1) {
+    const row = rows[R - range.s.r - 1];
+    if (!row) continue;
+    const cell = sheet[XLSX.utils.encode_cell({ r: R, c: dueDateCol })];
+    if (!cell) continue;
+
+    const formatted = cell.w != null ? String(cell.w).trim() : "";
+    const rawStr = typeof cell.v === "string" ? String(cell.v).trim() : "";
+
+    // Prefer text so we can force Indian DD/MM (Excel serials often store US MM/DD).
+    if (rawStr && looksLikeDmyDateText(rawStr)) {
+      row[dueDateHeader] = rawStr;
+    } else if (formatted && looksLikeDmyDateText(formatted)) {
+      row[dueDateHeader] = formatted;
+    } else if (typeof cell.v === "number" && isLikelyExcelSerial(cell.v, cell.v)) {
+      row[dueDateHeader] = cell.v;
+    } else if (formatted) {
+      row[dueDateHeader] = formatted;
+    }
+  }
+
+  return rows;
 };
 
 const validateAndNormalizeBatchRows = async ({
