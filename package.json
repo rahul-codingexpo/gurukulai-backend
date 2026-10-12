@@ -1,0 +1,43 @@
+{
+  "name": "gurukulai-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "backfill:fee-invoice-discount": "node scripts/backfill-feeinvoice-discount.mjs",
+    "migrate:spaces-urls": "node scripts/migrate-spaces-urls-to-local.mjs",
+    "migrate:quiz-questions-global": "node scripts/migrate-quiz-questions-global.mjs",
+    "fix:student-dates-from-sheet": "node scripts/fix-student-dates-from-sheet.mjs",
+    "test:whatsapp-invoice": "node scripts/test-fee-invoice-whatsapp.mjs",
+    "test:school-welcome": "node scripts/test-school-welcome.js",
+    "diagnose:whysms": "node scripts/diagnose-whysms.mjs",
+    "fee:due-reminders": "node scripts/run-fee-due-reminders.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1029.0",
+    "@aws-sdk/s3-request-presigner": "^3.1062.0",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.2.1",
+    "morgan": "^1.10.1",
+    "multer": "^2.1.1",
+    "multer-s3": "^3.0.1",
+    "node-cron": "^4.2.1",
+    "pdfkit": "^0.18.0",
+    "uuid": "^13.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}

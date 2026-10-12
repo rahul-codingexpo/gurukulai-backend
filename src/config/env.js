@@ -1,0 +1,31 @@
+import dotenv from "dotenv";
+
+dotenv.config();
+
+export const ENV = {
+  PORT: process.env.PORT,
+  MONGO_URI: process.env.MONGO_URI,
+  JWT_SECRET: process.env.JWT_SECRET,
+  DO_SPACES_KEY: process.env.DO_SPACES_KEY,
+  DO_SPACES_SECRET: process.env.DO_SPACES_SECRET,
+  DO_SPACES_BUCKET: process.env.DO_SPACES_BUCKET,
+  DO_SPACES_REGION: process.env.DO_SPACES_REGION,
+  DO_SPACES_ENDPOINT: process.env.DO_SPACES_ENDPOINT,
+  DO_SPACES_ACL: process.env.DO_SPACES_ACL,
+
+  // WhySMS / WhatsApp (shared transport; per-template names in process.env WHYSMS_TPL_*)
+  WHYSMS_WHATSAPP_ENABLED: process.env.WHYSMS_WHATSAPP_ENABLED,
+  WHYSMS_PROVIDER: process.env.WHYSMS_PROVIDER,
+  WHYSMS_API_KEY: process.env.WHYSMS_API_KEY,
+  WHYSMS_LICENSE_KEY: process.env.WHYSMS_LICENSE_KEY,
+  WHYSMS_WHATSAPP_FROM: process.env.WHYSMS_WHATSAPP_FROM,
+  WHYSMS_TEMPLATE_LANGUAGE: process.env.WHYSMS_TEMPLATE_LANGUAGE,
+  WHYSMS_API_BASE_URL: process.env.WHYSMS_API_BASE_URL,
+  WHYSMS_WHATSAPP_SEND_PATH: process.env.WHYSMS_WHATSAPP_SEND_PATH,
+  WHYSMS_META_API_VERSION: process.env.WHYSMS_META_API_VERSION,
+  WHYSMS_META_GRAPH_URL: process.env.WHYSMS_META_GRAPH_URL,
+  WHYSMS_WAPP_API_BASE: process.env.WHYSMS_WAPP_API_BASE,
+  NODE_ENV: process.env.NODE_ENV,
+  RESEND_MAIL_API_KEY: process.env.RESEND_MAIL_API_KEY,
+  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL || "Medhyx Technology <onboarding@resend.dev>",
+};

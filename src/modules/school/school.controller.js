@@ -1,0 +1,350 @@
+import School from "./school.model.js";
+import mongoose from "mongoose";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
+import { sendSchoolWelcomeEmail } from "../../services/email.service.js";
+
+/**
+ * Create School
+ * Only SuperAdmin
+ */
+// export const createSchool = async (req, res, next) => {
+//   try {
+//     const school = await School.create(req.body);
+
+//     res.status(201).json({
+//       success: true,
+//       data: school,
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+export const createSchool = async (req, res, next) => {
+  try {
+    let logoPath = null;
+    const logoFile =
+      req.files?.logo?.[0] ||
+      req.files?.schoolLogo?.[0] ||
+      req.file ||
+      null;
+
+    if (logoFile) {
+      logoPath = uploadedFileUrl(logoFile);
+    }
+
+    const school = await School.create({
+      ...req.body,
+      logo: logoPath,
+    });
+
+    // Send onboarding welcome email to the school email asynchronously
+    if (school.email) {
+      sendSchoolWelcomeEmail(school).catch((err) => {
+        console.error(`Failed to send onboarding welcome email to school: ${school.email}`, err);
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      data: school,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get All Schools
+ */
+// export const getSchools = async (req, res, next) => {
+//   try {
+//     const schools = await School.find();
+
+//     res.json({
+//       success: true,
+//       data: schools,
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+export const getSchools = async (req, res, next) => {
+  try {
+    const isSuperAdmin = req.user?.roleId?.name === "SuperAdmin";
+
+    const homeId = req.user?.schoolId?._id || req.user?.schoolId;
+    const filter = isSuperAdmin
+      ? {}
+      : { _id: homeId };
+
+    const schools = await School.find(filter).populate("branchId", "name status");
+
+    res.json({
+      success: true,
+      data: schools,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Campuses in the caller's branch group (for accounting campus selection).
+ */
+export const getBranchCampuses = async (req, res, next) => {
+  try {
+    const roleName = req.user?.roleId?.name;
+    if (roleName === "SuperAdmin") {
+      return res.json({ success: true, data: [] });
+    }
+
+    const homeId = req.user?.schoolId?._id || req.user?.schoolId;
+    if (!homeId) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const home = await School.findById(homeId).select("branchId").lean();
+    const filter = home?.branchId ? { branchId: home.branchId } : { _id: homeId };
+
+    const campuses = await School.find(filter)
+      .select("name schoolCode address city state pincode status branchId upiId qrCode logo website affiliation registrationNumber yearEstablished feeReceiptSettings idCardSettings marksheetSettings")
+      .populate("branchId", "name")
+      .sort({ name: 1 })
+      .lean();
+
+    res.json({
+      success: true,
+      data: campuses,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Update School
+ */
+export const updateSchool = async (req, res, next) => {
+  try {
+    const roleName = req.user?.roleId?.name;
+
+    // Security: non-SuperAdmin can update only their own school.
+    if (roleName !== "SuperAdmin") {
+      const mySchoolId = req.user?.schoolId?._id ?? req.user?.schoolId;
+      if (!mySchoolId || String(mySchoolId) !== String(req.params.id)) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have permission to update this school",
+        });
+      }
+    }
+
+    const schoolDoc = await School.findById(req.params.id);
+    if (!schoolDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "School not found",
+      });
+    }
+
+    const update = { ...(req.body || {}) };
+
+    // Canonicalize UPI id (accept aliases)
+    const canonicalUpiId = update.upiId ?? update.paymentUpiId;
+    if (canonicalUpiId !== undefined) {
+      update.upiId = String(canonicalUpiId).trim();
+    }
+    delete update.paymentUpiId;
+    if (update.payment) delete update.payment;
+
+    // Canonicalize QR code (accept file uploads aliases)
+    const logoFile =
+      req.files?.logo?.[0] ||
+      req.files?.schoolLogo?.[0] ||
+      null;
+    const qrFile =
+      req.files?.qrCode?.[0] ||
+      req.files?.paymentQr?.[0] ||
+      req.file ||
+      null;
+    if (logoFile) {
+      update.logo = uploadedFileUrl(logoFile);
+    }
+    if (qrFile) {
+      update.qrCode = uploadedFileUrl(qrFile);
+    }
+    delete update.paymentQr;
+
+    // If user provided qrCode as a string in body, allow it
+    if (req.body?.qrCode) {
+      update.qrCode = String(req.body.qrCode).trim();
+    }
+
+    // Timetable template settings (Option D — Hybrid).
+    // Accepts JSON either in req.body.timetableSettings (object) or
+    // req.body.timetableSettingsJson (stringified JSON for multipart).
+    let parsedTimetableSettings = null;
+    if (update.timetableSettings && typeof update.timetableSettings === "string") {
+      try { parsedTimetableSettings = JSON.parse(update.timetableSettings); } catch (_) {}
+    } else if (update.timetableSettings && typeof update.timetableSettings === "object") {
+      parsedTimetableSettings = update.timetableSettings;
+    } else if (update.timetableSettingsJson) {
+      try { parsedTimetableSettings = JSON.parse(update.timetableSettingsJson); } catch (_) {}
+      delete update.timetableSettingsJson;
+    }
+
+    const overlayImageFile = req.files?.timetableTemplateImage?.[0] || null;
+    if (parsedTimetableSettings || overlayImageFile) {
+      const existingSettings = schoolDoc.timetableSettings?.toObject?.() || schoolDoc.timetableSettings || {};
+      const merged = {
+        ...existingSettings,
+        ...(parsedTimetableSettings || {}),
+        theme: {
+          ...(existingSettings.theme || {}),
+          ...((parsedTimetableSettings && parsedTimetableSettings.theme) || {}),
+        },
+        imageOverlay: {
+          ...(existingSettings.imageOverlay || {}),
+          ...((parsedTimetableSettings && parsedTimetableSettings.imageOverlay) || {}),
+        },
+      };
+      if (overlayImageFile) {
+        const previousUrl = existingSettings.imageOverlay?.imageUrl;
+        merged.imageOverlay.imageUrl = uploadedFileUrl(overlayImageFile);
+        if (previousUrl && previousUrl !== merged.imageOverlay.imageUrl) {
+          await deleteFromSpacesByUrl(previousUrl);
+        }
+      }
+      update.timetableSettings = merged;
+    }
+
+    // Fee receipt print template settings
+    let parsedFeeReceiptSettings = null;
+    if (update.feeReceiptSettings && typeof update.feeReceiptSettings === "string") {
+      try {
+        parsedFeeReceiptSettings = JSON.parse(update.feeReceiptSettings);
+      } catch (_) {}
+    } else if (update.feeReceiptSettings && typeof update.feeReceiptSettings === "object") {
+      parsedFeeReceiptSettings = update.feeReceiptSettings;
+    } else if (update.feeReceiptSettingsJson) {
+      try {
+        parsedFeeReceiptSettings = JSON.parse(update.feeReceiptSettingsJson);
+      } catch (_) {}
+      delete update.feeReceiptSettingsJson;
+    }
+    if (parsedFeeReceiptSettings) {
+      const existing =
+        schoolDoc.feeReceiptSettings?.toObject?.() || schoolDoc.feeReceiptSettings || {};
+      update.feeReceiptSettings = {
+        ...existing,
+        ...parsedFeeReceiptSettings,
+      };
+    }
+
+    // ID card print template settings
+    let parsedIdCardSettings = null;
+    if (update.idCardSettings && typeof update.idCardSettings === "string") {
+      try {
+        parsedIdCardSettings = JSON.parse(update.idCardSettings);
+      } catch (_) {}
+    } else if (update.idCardSettings && typeof update.idCardSettings === "object") {
+      parsedIdCardSettings = update.idCardSettings;
+    } else if (update.idCardSettingsJson) {
+      try {
+        parsedIdCardSettings = JSON.parse(update.idCardSettingsJson);
+      } catch (_) {}
+      delete update.idCardSettingsJson;
+    }
+    if (parsedIdCardSettings) {
+      const existing =
+        schoolDoc.idCardSettings?.toObject?.() || schoolDoc.idCardSettings || {};
+      update.idCardSettings = {
+        ...existing,
+        ...parsedIdCardSettings,
+      };
+    }
+
+    // Marksheet / report card print template settings
+    let parsedMarksheetSettings = null;
+    if (update.marksheetSettings && typeof update.marksheetSettings === "string") {
+      try {
+        parsedMarksheetSettings = JSON.parse(update.marksheetSettings);
+      } catch (_) {}
+    } else if (update.marksheetSettings && typeof update.marksheetSettings === "object") {
+      parsedMarksheetSettings = update.marksheetSettings;
+    } else if (update.marksheetSettingsJson) {
+      try {
+        parsedMarksheetSettings = JSON.parse(update.marksheetSettingsJson);
+      } catch (_) {}
+      delete update.marksheetSettingsJson;
+    }
+    if (parsedMarksheetSettings) {
+      const existing =
+        schoolDoc.marksheetSettings?.toObject?.() || schoolDoc.marksheetSettings || {};
+      update.marksheetSettings = {
+        ...existing,
+        ...parsedMarksheetSettings,
+      };
+    }
+
+    const school = await School.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+    });
+
+    if (logoFile && schoolDoc.logo && schoolDoc.logo !== update.logo) {
+      await deleteFromSpacesByUrl(schoolDoc.logo);
+    }
+    if (qrFile && schoolDoc.qrCode && schoolDoc.qrCode !== update.qrCode) {
+      await deleteFromSpacesByUrl(schoolDoc.qrCode);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...school.toObject(),
+        // Compatibility aliases for existing frontend implementations
+        paymentUpiId: school.upiId,
+        paymentQr: school.qrCode,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteSchool = async (req, res, next) => {
+  try {
+    const schoolId = req.params.id;
+    const school = await School.findById(schoolId);
+    if (!school) {
+      return res.status(404).json({
+        success: false,
+        message: "School not found",
+      });
+    }
+
+    const modelNames = mongoose.modelNames().filter((name) => name !== "School");
+
+    const deleteTasks = modelNames.map(async (name) => {
+      const Model = mongoose.model(name);
+      // Only cascade on models that actually store school ownership.
+      if (!Model.schema.path("schoolId")) return;
+      await Model.deleteMany({ schoolId });
+    });
+
+    await Promise.all(deleteTasks);
+    await School.deleteOne({ _id: schoolId });
+
+    if (school.logo) await deleteFromSpacesByUrl(school.logo);
+    if (school.qrCode) await deleteFromSpacesByUrl(school.qrCode);
+
+    return res.json({
+      success: true,
+      message: "School and related data deleted successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};

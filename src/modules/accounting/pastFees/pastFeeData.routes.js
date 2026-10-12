@@ -1,0 +1,179 @@
+import express from "express";
+import multer from "multer";
+import { protect } from "../../../middleware/auth.middleware.js";
+import { authorize } from "../../../middleware/role.middleware.js";
+import {
+  injectSchool,
+  injectBranchSchoolScope,
+} from "../../../middleware/injectSchool.middleware.js";
+import {
+  importPastFees,
+  createPastFeeRecord,
+  listPastFeeImports,
+  listPastFeeRecords,
+  getStudentPastFeeSummary,
+  updatePastFeeRecord,
+  softDeletePastFeeRecord,
+  restorePastFeeRecord,
+  preparePastFeeWhatsApp,
+  recordPastFeePayment,
+  createInvoiceFromPastFee,
+} from "./pastFeeData.controller.js";
+
+const router = express.Router();
+
+const denySuperAdmin = (req, res, next) => {
+  if (req.user?.roleId?.name === "SuperAdmin") {
+    return res.status(403).json({
+      success: false,
+      message: "You do not have permission",
+    });
+  }
+  next();
+};
+
+const fileFilter = (req, file, cb) => {
+  const ext = String(file.originalname || "").toLowerCase().split(".").pop();
+  const mime = file.mimetype || "";
+  const allowedExt = ["csv", "xlsx", "xls"];
+
+  const allowedMime = [
+    "text/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ];
+
+  if (allowedExt.includes(ext) || allowedMime.includes(mime)) cb(null, true);
+  else cb(new Error("Only CSV/XLS/XLSX files are allowed"), false);
+};
+
+const uploadPastFeeFile = multer({
+  storage: multer.memoryStorage(),
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+});
+
+// Endpoint 1: Single record create
+router.post(
+  "/accounting/past-fees",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  injectBranchSchoolScope,
+  createPastFeeRecord,
+);
+
+// Endpoint 2: Bulk Import
+router.post(
+  "/accounting/past-fees/import",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  injectBranchSchoolScope,
+  uploadPastFeeFile.single("file"),
+  importPastFees,
+);
+
+// Endpoint 3: List Import History (Batches)
+router.get(
+  "/accounting/past-fees/imports",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  injectBranchSchoolScope,
+  listPastFeeImports,
+);
+
+// Endpoint 4: List Past Fee Records (with Filters)
+router.get(
+  "/accounting/past-fees",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  injectBranchSchoolScope,
+  listPastFeeRecords,
+);
+
+// Optional Endpoint 5: Past Fee Summary by Student
+router.get(
+  "/accounting/past-fees/students/:studentId/summary",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  injectBranchSchoolScope,
+  getStudentPastFeeSummary,
+);
+
+// WhatsApp dues reminder (student / parents)
+router.post(
+  "/accounting/past-fees/:id/manual-whatsapp",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  injectBranchSchoolScope,
+  preparePastFeeWhatsApp,
+);
+
+// Record payment → creates/updates linked Fee Invoice
+router.post(
+  "/accounting/past-fees/:id/record-payment",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  injectBranchSchoolScope,
+  recordPastFeePayment,
+);
+
+// Create invoice from past due (no payment) — for bundling with new fee invoices
+router.post(
+  "/accounting/past-fees/:id/create-invoice",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal", "Accountant"),
+  injectSchool,
+  injectBranchSchoolScope,
+  createInvoiceFromPastFee,
+);
+
+// Endpoint 6: Edit a single past fee record
+router.put(
+  "/accounting/past-fees/:id",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  injectBranchSchoolScope,
+  updatePastFeeRecord,
+);
+
+// Endpoint 7: Soft delete a past fee record
+router.delete(
+  "/accounting/past-fees/:id",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  injectBranchSchoolScope,
+  softDeletePastFeeRecord,
+);
+
+// Endpoint 8: Restore a soft-deleted past fee record
+router.post(
+  "/accounting/past-fees/:id/restore",
+  protect,
+  denySuperAdmin,
+  authorize("Admin", "Principal"),
+  injectSchool,
+  injectBranchSchoolScope,
+  restorePastFeeRecord,
+);
+
+export default router;
+
