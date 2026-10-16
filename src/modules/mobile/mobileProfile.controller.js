@@ -113,6 +113,23 @@ export const getMobileProfile = async (req, res, next) => {
             fatherPhone: fatherPhone || null,
             motherPhone: motherPhone || null,
           },
+          guardianDetails: {
+            father: {
+              name: fatherName || "",
+              phone: fatherPhone || "",
+              occupation: student?.parents?.father?.occupation || "",
+              qualification: student?.parents?.father?.qualification || "",
+              photo: student?.parents?.father?.photo || "",
+            },
+            mother: {
+              name: motherName || "",
+              phone: motherPhone || "",
+              occupation: student?.parents?.mother?.occupation || "",
+              qualification: student?.parents?.mother?.qualification || "",
+              photo: student?.parents?.mother?.photo || "",
+            },
+            address: student?.address || "",
+          },
           ...(isParent ? { parentDetails: parentProfileDetails } : {}),
         },
       });

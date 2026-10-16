@@ -61,6 +61,13 @@ import {
   listMobileHomeworkSubmissions,
   getMobileHomeworkSubmissionByStudent,
 } from "./mobileHomework.controller.js";
+import {
+  listMobileStudyMaterials,
+  getMobileStudyMaterialById,
+  createMobileStudyMaterial,
+} from "./mobileStudyMaterial.controller.js";
+import { listMobileClasses } from "./mobileClasses.controller.js";
+import { getMobileGuardian } from "./mobileGuardian.controller.js";
 
 const router = express.Router();
 const mobileOnly = (req, res, next) => {
@@ -80,6 +87,23 @@ router.get("/dashboard/teacher", protect, mobileOnly, getTeacherDashboard);
 
 // Mobile profile (header avatar -> profile screen)
 router.get("/profile", protect, mobileOnly, getMobileProfile);
+
+// Guardian details (Student/Parent)
+router.get("/guardian", protect, mobileOnly, getMobileGuardian);
+
+// Classes list (mobile — replaces web GET /classes for app)
+router.get("/classes", protect, mobileOnly, listMobileClasses);
+
+// Study materials (mobile)
+router.get("/study-materials", protect, mobileOnly, listMobileStudyMaterials);
+router.get("/study-materials/:id", protect, mobileOnly, getMobileStudyMaterialById);
+router.post(
+  "/study-materials",
+  protect,
+  mobileOnly,
+  uploadStudyMaterials.fields([{ name: "files", maxCount: 10 }]),
+  createMobileStudyMaterial,
+);
 
 // Mobile events list (filter=all|read|unread)
 router.get("/events", protect, mobileOnly, listMobileEvents);
