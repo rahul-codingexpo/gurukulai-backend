@@ -19,6 +19,7 @@ const pastFeeRecordSchema = new Schema(
     },
 
     studentName: { type: String, required: true, trim: true },
+    fatherName: { type: String, default: "", trim: true },
     admissionNumber: { type: String, required: true, trim: true, index: true },
 
     className: { type: String, required: true, trim: true, index: true },

@@ -7,7 +7,7 @@ const populateSubject = (query) =>
 /** Bulk create same subject for multiple classes (one Subject row per class). */
 export const createSubjectsBulk = async (req, res, next) => {
   try {
-    const { name, code, type, sessionId, classIds } = req.body || {};
+    const { name, code, type, sessionId, classIds, category } = req.body || {};
     const trimmedName = String(name || "").trim();
 
     if (!trimmedName) {
@@ -73,6 +73,7 @@ export const createSubjectsBulk = async (req, res, next) => {
           name: trimmedName,
           code: code ? String(code).trim() : undefined,
           type: type ? String(type).trim() : "Theory",
+          category: category ? String(category).trim() : "Core",
           classId: cls._id,
           sessionId,
           schoolId: req.schoolId,
@@ -129,7 +130,7 @@ export const createSubject = async (req, res, next) => {
 export const updateSubject = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, code, type, classId, sessionId } = req.body;
+    const { name, code, type, classId, sessionId, category } = req.body;
 
     const subject = await Subject.findOne({
       _id: id,
@@ -146,6 +147,7 @@ export const updateSubject = async (req, res, next) => {
     if (name !== undefined) subject.name = name;
     if (code !== undefined) subject.code = code;
     if (type !== undefined) subject.type = type;
+    if (category !== undefined) subject.category = category;
     if (classId !== undefined) subject.classId = classId;
     if (sessionId !== undefined) subject.sessionId = sessionId;
 

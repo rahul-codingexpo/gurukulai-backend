@@ -12,8 +12,16 @@ const subjectSchema = new mongoose.Schema(
     },
 
     type: {
-      type: String, // e.g. Theory / Practical / Elective
+      type: String, // legacy; Theory/Practical/Oral are configured per exam
       trim: true,
+      default: "Theory",
+    },
+
+    /** Core / Optional — academic grouping (not exam paper type). */
+    category: {
+      type: String,
+      trim: true,
+      default: "Core",
     },
 
     classId: {

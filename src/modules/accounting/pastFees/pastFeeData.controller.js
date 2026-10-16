@@ -290,6 +290,7 @@ const validateAndNormalizeBatchRows = async ({
   const dueDateKey = "duedate";
   const remarksKey = "remarks";
   const studentNameKey = "studentname";
+  const fatherNameKey = "fathername";
 
   const requiredHeaders = [admissionKey, dueAmountKey];
   if (!sessionOverride) requiredHeaders.push(sessionKey);
@@ -415,10 +416,18 @@ const validateAndNormalizeBatchRows = async ({
       continue;
     }
 
+    const fatherNameFromRow = String(
+      getRowValue(row, fatherNameKey, keyMap),
+    ).trim();
+    const fatherName = String(
+      student.parents?.father?.name || fatherNameFromRow || "",
+    ).trim();
+
     importedDocs.push({
       schoolId,
       studentId: student._id,
       studentName,
+      fatherName,
       admissionNumber,
       className,
       section,
@@ -725,7 +734,7 @@ export const listPastFeeRecords = async (req, res, next) => {
 
     if (search) {
       const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      match.$or = [{ admissionNumber: rx }, { studentName: rx }];
+      match.$or = [{ admissionNumber: rx }, { studentName: rx }, { fatherName: rx }];
     }
 
     if (statusMatch === "Paid") {
@@ -749,6 +758,7 @@ export const listPastFeeRecords = async (req, res, next) => {
     const [total, rows] = await Promise.all([
       PastFeeRecord.countDocuments(match),
       PastFeeRecord.find(match)
+        .populate("studentId", "name parents.father.name")
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -775,22 +785,41 @@ export const listPastFeeRecords = async (req, res, next) => {
       await PastFeeRecord.bulkWrite(repairOps, { ordered: false });
     }
 
-    const items = (rows || []).map((i) => ({
-      _id: i._id,
-      studentId: i.studentId,
-      studentName: i.studentName,
-      admissionNumber: i.admissionNumber,
-      className: i.className,
-      section: i.section,
-      session: i.session,
-      dueAmount: i.dueAmount,
-      paidAmount: i.paidAmount,
-      balance: i.balance,
-      dueDate: toISODateOnly(i.dueDate),
-      remarks: i.remarks,
-      invoiceId: i.invoiceId || null,
-      createdAt: i.createdAt,
-    }));
+    const fatherBackfillOps = [];
+    const items = (rows || []).map((i) => {
+      const studentDoc =
+        i.studentId && typeof i.studentId === "object" ? i.studentId : null;
+      const fatherFromStudent = String(studentDoc?.parents?.father?.name || "").trim();
+      const fatherName = String(i.fatherName || fatherFromStudent || "").trim();
+      if (!i.fatherName && fatherFromStudent && i._id) {
+        fatherBackfillOps.push({
+          updateOne: {
+            filter: { _id: i._id },
+            update: { $set: { fatherName: fatherFromStudent } },
+          },
+        });
+      }
+      return {
+        _id: i._id,
+        studentId: studentDoc?._id || i.studentId,
+        studentName: i.studentName,
+        fatherName,
+        admissionNumber: i.admissionNumber,
+        className: i.className,
+        section: i.section,
+        session: i.session,
+        dueAmount: i.dueAmount,
+        paidAmount: i.paidAmount,
+        balance: i.balance,
+        dueDate: toISODateOnly(i.dueDate),
+        remarks: i.remarks,
+        invoiceId: i.invoiceId || null,
+        createdAt: i.createdAt,
+      };
+    });
+    if (fatherBackfillOps.length) {
+      PastFeeRecord.bulkWrite(fatherBackfillOps, { ordered: false }).catch(() => {});
+    }
 
     return ok(res, {
       data: {

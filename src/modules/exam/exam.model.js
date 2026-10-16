@@ -7,12 +7,20 @@ const examSubjectSchema = new mongoose.Schema(
       ref: "Subject",
       required: true,
     },
+    /** Totals across enabled paper types (kept for grade % / legacy UI). */
     maxMarks: { type: Number, required: true },
     passMarks: { type: Number, required: true },
     /** Which paper types apply for this subject in this exam */
     hasWritten: { type: Boolean, default: true },
     hasPractical: { type: Boolean, default: false },
     hasOral: { type: Boolean, default: false },
+    /** Per-paper max / pass (optional; falls back to maxMarks/passMarks for theory). */
+    theoryMaxMarks: { type: Number, default: null },
+    theoryPassMarks: { type: Number, default: null },
+    practicalMaxMarks: { type: Number, default: null },
+    practicalPassMarks: { type: Number, default: null },
+    oralMaxMarks: { type: Number, default: null },
+    oralPassMarks: { type: Number, default: null },
   },
   { _id: false },
 );
@@ -23,6 +31,13 @@ const examScheduleSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subject",
       required: true,
+    },
+    /** Theory | Practical | Oral — one schedule row per paper type. */
+    paperType: {
+      type: String,
+      enum: ["Theory", "Practical", "Oral"],
+      default: "Theory",
+      trim: true,
     },
     examDate: { type: Date, required: true },
     startTime: { type: String, required: true, trim: true },
@@ -83,4 +98,3 @@ examSchema.index(
 );
 
 export default mongoose.model("Exam", examSchema);
-

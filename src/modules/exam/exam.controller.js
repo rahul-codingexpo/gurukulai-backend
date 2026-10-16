@@ -52,10 +52,113 @@ const formatDateSheetLabels = (dateKey) => {
 
 const isClass11Or12 = (className) => /\b(11|12)\b/.test(String(className || ""));
 
+const PAPER_TYPES = ["Theory", "Practical", "Oral"];
+const normalizePaperType = (value) => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "practical") return "Practical";
+  if (raw === "oral") return "Oral";
+  if (raw === "theory" || raw === "written") return "Theory";
+  return "Theory";
+};
+
+const enabledPaperTypesForSubject = (s) => {
+  const types = [];
+  if (s.hasWritten !== false) types.push("Theory");
+  if (s.hasPractical) types.push("Practical");
+  if (s.hasOral) types.push("Oral");
+  return types.length ? types : ["Theory"];
+};
+
+const numOrNull = (v) => {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const resolvePaperMarks = (s, paperType) => {
+  const fallbackMax = Number(s.maxMarks) || 0;
+  const fallbackPass = Number(s.passMarks) || 0;
+  if (paperType === "Practical") {
+    return {
+      maxMarks: numOrNull(s.practicalMaxMarks) ?? (s.hasPractical ? fallbackMax : 0),
+      passMarks: numOrNull(s.practicalPassMarks) ?? (s.hasPractical ? fallbackPass : 0),
+    };
+  }
+  if (paperType === "Oral") {
+    return {
+      maxMarks: numOrNull(s.oralMaxMarks) ?? (s.hasOral ? fallbackMax : 0),
+      passMarks: numOrNull(s.oralPassMarks) ?? (s.hasOral ? fallbackPass : 0),
+    };
+  }
+  return {
+    maxMarks: numOrNull(s.theoryMaxMarks) ?? fallbackMax,
+    passMarks: numOrNull(s.theoryPassMarks) ?? fallbackPass,
+  };
+};
+
+const normalizeSubjectPayload = (s) => {
+  const hasWritten = s.hasWritten !== false;
+  const hasPractical = Boolean(s.hasPractical);
+  const hasOral = Boolean(s.hasOral);
+  const theoryMax = numOrNull(s.theoryMaxMarks);
+  const theoryPass = numOrNull(s.theoryPassMarks);
+  const practicalMax = numOrNull(s.practicalMaxMarks);
+  const practicalPass = numOrNull(s.practicalPassMarks);
+  const oralMax = numOrNull(s.oralMaxMarks);
+  const oralPass = numOrNull(s.oralPassMarks);
+
+  let maxMarks = 0;
+  let passMarks = 0;
+  if (hasWritten) {
+    maxMarks += theoryMax != null ? theoryMax : Number(s.maxMarks) || 0;
+    passMarks += theoryPass != null ? theoryPass : Number(s.passMarks) || 0;
+  }
+  if (hasPractical) {
+    maxMarks += practicalMax != null ? practicalMax : 0;
+    passMarks += practicalPass != null ? practicalPass : 0;
+  }
+  if (hasOral) {
+    maxMarks += oralMax != null ? oralMax : 0;
+    passMarks += oralPass != null ? oralPass : 0;
+  }
+  if (maxMarks <= 0) {
+    maxMarks = Number(s.maxMarks) || 0;
+    passMarks = Number(s.passMarks) || 0;
+  }
+
+  return {
+    subjectId: s.subjectId,
+    maxMarks,
+    passMarks,
+    hasWritten,
+    hasPractical,
+    hasOral,
+    theoryMaxMarks: hasWritten
+      ? (theoryMax != null ? theoryMax : Number(s.maxMarks) || maxMarks || 0)
+      : null,
+    theoryPassMarks: hasWritten
+      ? (theoryPass != null ? theoryPass : Number(s.passMarks) || passMarks || 0)
+      : null,
+    practicalMaxMarks: hasPractical ? (practicalMax != null ? practicalMax : 0) : null,
+    practicalPassMarks: hasPractical ? (practicalPass != null ? practicalPass : 0) : null,
+    oralMaxMarks: hasOral ? (oralMax != null ? oralMax : 0) : null,
+    oralPassMarks: hasOral ? (oralPass != null ? oralPass : 0) : null,
+  };
+};
+
 const getExamSubjectMap = (exam) => {
   const map = new Map();
   for (const s of exam.subjects || []) {
-    map.set(String(s.subjectId), { maxMarks: s.maxMarks, passMarks: s.passMarks });
+    const sid = String(s.subjectId?._id || s.subjectId);
+    map.set(sid, {
+      ...s,
+      maxMarks: s.maxMarks,
+      passMarks: s.passMarks,
+      papers: enabledPaperTypesForSubject(s).reduce((acc, type) => {
+        acc[type] = resolvePaperMarks(s, type);
+        return acc;
+      }, {}),
+    });
   }
   return map;
 };
@@ -76,23 +179,33 @@ const normalizeExam = (examDoc) => {
     sectionName: e.sectionId?.name || null,
     instructions: e.instructions || "",
     syllabusUrl: (e.syllabusUrl || "").trim() || null,
-    subjects: (e.subjects || []).map((s) => ({
-      subjectId: s.subjectId?._id || s.subjectId,
-      subjectName: s.subjectId?.name || "",
-      subjectCode: s.subjectId?.code || "",
-      examType: (s.subjectId?.type || "").trim() || null,
-      maxMarks: s.maxMarks,
-      passMarks: s.passMarks,
-      hasWritten: s.hasWritten !== false,
-      hasPractical: Boolean(s.hasPractical),
-      hasOral: Boolean(s.hasOral),
-    })),
+    subjects: (e.subjects || []).map((s) => {
+      const normalized = normalizeSubjectPayload(s);
+      return {
+        subjectId: s.subjectId?._id || s.subjectId,
+        subjectName: s.subjectId?.name || "",
+        subjectCode: s.subjectId?.code || "",
+        examType: (s.subjectId?.type || "").trim() || null,
+        maxMarks: normalized.maxMarks,
+        passMarks: normalized.passMarks,
+        hasWritten: normalized.hasWritten,
+        hasPractical: normalized.hasPractical,
+        hasOral: normalized.hasOral,
+        theoryMaxMarks: normalized.theoryMaxMarks,
+        theoryPassMarks: normalized.theoryPassMarks,
+        practicalMaxMarks: normalized.practicalMaxMarks,
+        practicalPassMarks: normalized.practicalPassMarks,
+        oralMaxMarks: normalized.oralMaxMarks,
+        oralPassMarks: normalized.oralPassMarks,
+      };
+    }),
     schedule: (e.schedule || []).map((x) => ({
       subjectId: x.subjectId?._id || x.subjectId,
       subjectName:
         x.subjectId?.name || subjectNameMap.get(String(x.subjectId?._id || x.subjectId)) || "",
       subjectCode: x.subjectId?.code || "",
       examType: (x.subjectId?.type || "").trim() || null,
+      paperType: normalizePaperType(x.paperType),
       examDate: x.examDate,
       startTime: x.startTime,
       endTime: x.endTime,
@@ -126,15 +239,25 @@ const validateExamPayload = async (schoolId, payload) => {
   if (new Set(subIds).size !== subIds.length) return "Duplicate subjectId not allowed";
 
   for (const s of subjects) {
-    if (!s.subjectId || Number(s.maxMarks) <= 0) return "Invalid subject maxMarks";
-    if (Number(s.passMarks) < 0 || Number(s.passMarks) > Number(s.maxMarks)) {
-      return "passMarks must be between 0 and maxMarks";
-    }
     const hasWritten = s.hasWritten !== false;
     const hasPractical = Boolean(s.hasPractical);
     const hasOral = Boolean(s.hasOral);
     if (!hasWritten && !hasPractical && !hasOral) {
       return "Each subject must have at least one paper type: Theory, Practical, or Oral";
+    }
+    const normalized = normalizeSubjectPayload(s);
+    if (!s.subjectId || Number(normalized.maxMarks) <= 0) return "Invalid subject maxMarks";
+    if (Number(normalized.passMarks) < 0 || Number(normalized.passMarks) > Number(normalized.maxMarks)) {
+      return "passMarks must be between 0 and maxMarks";
+    }
+    for (const paperType of enabledPaperTypesForSubject(normalized)) {
+      const marks = resolvePaperMarks(normalized, paperType);
+      if (Number(marks.maxMarks) <= 0) {
+        return `${paperType} max marks must be greater than 0`;
+      }
+      if (Number(marks.passMarks) < 0 || Number(marks.passMarks) > Number(marks.maxMarks)) {
+        return `${paperType} pass marks must be between 0 and max marks`;
+      }
     }
   }
 
@@ -147,17 +270,37 @@ const validateExamPayload = async (schoolId, payload) => {
     return "One or more subjects do not belong to selected class";
   }
 
-  const scheduleSubIds = schedule.map((x) => String(x.subjectId));
+  const requiredScheduleKeys = new Set();
+  for (const s of subjects) {
+    const sid = String(s.subjectId);
+    for (const paperType of enabledPaperTypesForSubject(s)) {
+      requiredScheduleKeys.add(`${sid}::${paperType}`);
+    }
+  }
+
+  const seenScheduleKeys = new Set();
   for (const x of schedule) {
     const date = toDateOnly(x.examDate);
+    const paperType = normalizePaperType(x.paperType);
     if (!x.subjectId || !date || !x.startTime || !x.endTime) {
       return "Each schedule row must contain subjectId, examDate, startTime, endTime";
     }
     if (x.startTime >= x.endTime) return "startTime must be less than endTime";
-  }
-  for (const sid of scheduleSubIds) {
-    if (!subIds.includes(String(sid))) {
+    const sid = String(x.subjectId);
+    if (!subIds.includes(sid)) {
       return "Schedule contains subject not present in subjects list";
+    }
+    const key = `${sid}::${paperType}`;
+    if (seenScheduleKeys.has(key)) {
+      return `Duplicate schedule for subject paper ${paperType}`;
+    }
+    seenScheduleKeys.add(key);
+  }
+
+  for (const key of requiredScheduleKeys) {
+    if (!seenScheduleKeys.has(key)) {
+      const [, paperType] = key.split("::");
+      return `Schedule is required for each selected paper type (${paperType})`;
     }
   }
   return null;
@@ -180,16 +323,10 @@ export const createExam = async (req, res, next) => {
       sectionId: payload.sectionId || null,
       instructions: payload.instructions || "",
       syllabusUrl: payload.syllabusUrl != null ? String(payload.syllabusUrl).trim() : "",
-      subjects: payload.subjects.map((s) => ({
-        subjectId: s.subjectId,
-        maxMarks: Number(s.maxMarks),
-        passMarks: Number(s.passMarks),
-        hasWritten: s.hasWritten !== false,
-        hasPractical: Boolean(s.hasPractical),
-        hasOral: Boolean(s.hasOral),
-      })),
+      subjects: payload.subjects.map((s) => normalizeSubjectPayload(s)),
       schedule: payload.schedule.map((x) => ({
         subjectId: x.subjectId,
+        paperType: normalizePaperType(x.paperType),
         examDate: toDateOnly(x.examDate),
         startTime: String(x.startTime),
         endTime: String(x.endTime),
@@ -357,13 +494,16 @@ export const getExamDateSheet = async (req, res, next) => {
         if (!dateKey) continue;
         const shift = getShiftKey(sch.startTime);
         const subjectName = sch.subjectId?.name || "Subject";
+        const paperType = normalizePaperType(sch.paperType);
+        const label = `${subjectName} (${paperType})`;
 
         if (!grid.has(dateKey)) {
           grid.set(dateKey, { "1st": new Map(), "2nd": new Map() });
         }
         const day = grid.get(dateKey);
         if (!day[shift].has(classKey)) day[shift].set(classKey, []);
-        day[shift].get(classKey).push(subjectName);
+        const cellSubjects = day[shift].get(classKey);
+        if (!cellSubjects.includes(label)) cellSubjects.push(label);
         shiftBuckets[shift].push({ startTime: sch.startTime, endTime: sch.endTime });
       }
     }
@@ -460,16 +600,10 @@ export const updateExam = async (req, res, next) => {
     existing.sectionId = merged.sectionId || null;
     existing.instructions = merged.instructions || "";
     existing.syllabusUrl = merged.syllabusUrl || "";
-    existing.subjects = merged.subjects.map((s) => ({
-      subjectId: s.subjectId,
-      maxMarks: Number(s.maxMarks),
-      passMarks: Number(s.passMarks),
-      hasWritten: s.hasWritten !== false,
-      hasPractical: Boolean(s.hasPractical),
-      hasOral: Boolean(s.hasOral),
-    }));
+    existing.subjects = merged.subjects.map((s) => normalizeSubjectPayload(s));
     existing.schedule = merged.schedule.map((x) => ({
       subjectId: x.subjectId,
+      paperType: normalizePaperType(x.paperType),
       examDate: toDateOnly(x.examDate),
       startTime: String(x.startTime),
       endTime: String(x.endTime),
@@ -542,13 +676,23 @@ export const getExamMarks = async (req, res, next) => {
     const filter = { schoolId, examId: exam._id };
     if (req.query.studentId) filter.studentId = req.query.studentId;
 
-    const marks = await ExamMark.find(filter).select("studentId subjectId value").lean();
+    const marks = await ExamMark.find(filter)
+      .select("studentId subjectId paperType value")
+      .lean();
     const data = {};
     for (const m of marks) {
       const sid = String(m.studentId);
       const sub = String(m.subjectId);
+      const paperType = normalizePaperType(m.paperType);
       if (!data[sid]) data[sid] = {};
-      data[sid][sub] = m.value;
+      const existing = data[sid][sub];
+      if (existing && typeof existing === "object") {
+        existing[paperType] = m.value;
+      } else if (existing != null && existing !== "") {
+        data[sid][sub] = { Theory: String(existing), [paperType]: m.value };
+      } else {
+        data[sid][sub] = { [paperType]: m.value };
+      }
     }
     res.json({ success: true, data });
   } catch (error) {
@@ -589,28 +733,59 @@ export const upsertExamMarks = async (req, res, next) => {
             message: `Subject ${subjectId} is not configured for this exam`,
           });
         }
-        const raw = String(subjectMap[subjectId]).trim().toUpperCase();
-        if (raw !== "AB") {
-          const n = Number(raw);
-          if (Number.isNaN(n)) {
-            return res.status(400).json({ success: false, message: `Invalid marks value for subject ${subjectId}` });
-          }
-          const maxMarks = subjectRules.get(String(subjectId)).maxMarks;
-          if (n < 0 || n > maxMarks) {
+        const rule = subjectRules.get(String(subjectId));
+        const cell = subjectMap[subjectId];
+        const paperValues =
+          cell && typeof cell === "object" && !Array.isArray(cell)
+            ? cell
+            : { Theory: cell };
+
+        for (const [rawType, rawVal] of Object.entries(paperValues)) {
+          const paperType = normalizePaperType(rawType);
+          if (!rule.papers[paperType]) {
             return res.status(400).json({
               success: false,
-              message: `Marks for subject ${subjectId} must be in range 0..${maxMarks}`,
+              message: `${paperType} is not enabled for subject ${subjectId}`,
             });
           }
-        }
+          const raw = String(rawVal ?? "").trim().toUpperCase();
+          if (raw === "") continue;
+          if (raw !== "AB") {
+            const n = Number(raw);
+            if (Number.isNaN(n)) {
+              return res.status(400).json({
+                success: false,
+                message: `Invalid marks value for subject ${subjectId} (${paperType})`,
+              });
+            }
+            const maxMarks = rule.papers[paperType].maxMarks;
+            if (n < 0 || n > maxMarks) {
+              return res.status(400).json({
+                success: false,
+                message: `Marks for subject ${subjectId} (${paperType}) must be in range 0..${maxMarks}`,
+              });
+            }
+          }
 
-        ops.push({
-          updateOne: {
-            filter: { schoolId, examId: exam._id, studentId, subjectId },
-            update: { $set: { value: raw === "AB" ? "AB" : String(Number(raw)) } },
-            upsert: true,
-          },
-        });
+          ops.push({
+            updateOne: {
+              filter: {
+                schoolId,
+                examId: exam._id,
+                studentId,
+                subjectId,
+                paperType,
+              },
+              update: {
+                $set: {
+                  value: raw === "AB" ? "AB" : String(Number(raw)),
+                  paperType,
+                },
+              },
+              upsert: true,
+            },
+          });
+        }
       }
     }
 
