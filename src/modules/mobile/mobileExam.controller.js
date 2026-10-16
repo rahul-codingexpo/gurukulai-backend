@@ -1,7 +1,6 @@
 import Exam from "../exam/exam.model.js";
 import Student from "../student/student.model.js";
-import ClassModel from "../academic/class.model.js";
-import Section from "../academic/section.model.js";
+import { resolveStudentClassSectionIds } from "../../utils/resolveClassByName.util.js";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 
@@ -26,27 +25,6 @@ const resolveStudentSelf = async (req) => {
     );
   }
   return null;
-};
-
-const resolveStudentClassSectionIds = async (student) => {
-  const schoolId = student.schoolId;
-  const classes = await ClassModel.find({
-    schoolId,
-    name: student.className,
-  }).select("_id");
-
-  if (!classes.length) {
-    return { classIds: [], sectionIds: [] };
-  }
-
-  const classIds = classes.map((c) => c._id);
-  const sections = await Section.find({
-    schoolId,
-    classId: { $in: classIds },
-    name: student.section,
-  }).select("_id");
-
-  return { classIds, sectionIds: sections.map((s) => s._id) };
 };
 
 const toDateOnly = (value) => {

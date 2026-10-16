@@ -1,7 +1,6 @@
 import FeeInvoice from "./feeInvoice.model.js";
 import FeeType from "./feeType.model.js";
-import Payment from "./payment.model.js";
-import { schoolIdMatchValue } from "../../utils/branchScope.util.js";
+import { schoolIdMatchValue, normalizeSchoolIdForQuery } from "../../utils/branchScope.util.js";
 
 const requireSchool = (req, res) => {
   if (!req.schoolId) {
@@ -23,7 +22,9 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 export const getDashboard = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const schoolId = schoolIdMatchValue(req);
+    const schoolMatch = {
+      schoolId: normalizeSchoolIdForQuery(schoolIdMatchValue(req)),
+    };
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -39,40 +40,56 @@ export const getDashboard = async (req, res, next) => {
       totalDiscountResult,
     ] = await Promise.all([
       FeeInvoice.aggregate([
-        { $match: { schoolId: schoolId, status: "Paid" } },
+        { $match: { ...schoolMatch, isDeleted: { $ne: true }, status: "Paid" } },
         { $group: { _id: null, total: { $sum: "$paid" } } },
       ]),
-      Payment.aggregate([
+      // Invoices marked Paid/Partial at create time do not always create a Payment row.
+      FeeInvoice.aggregate([
         {
           $match: {
-            schoolId: schoolId,
-            paymentDate: { $gte: startOfMonth, $lte: endOfMonth },
+            ...schoolMatch,
+            isDeleted: { $ne: true },
+            status: { $ne: "Cancelled" },
+            paid: { $gt: 0 },
           },
         },
-        { $group: { _id: null, total: { $sum: "$amount" } } },
+        {
+          $addFields: {
+            collectedAt: { $ifNull: ["$paidDate", "$createdAt"] },
+          },
+        },
+        {
+          $match: {
+            collectedAt: { $gte: startOfMonth, $lte: endOfMonth },
+          },
+        },
+        { $group: { _id: null, total: { $sum: "$paid" } } },
       ]),
       FeeInvoice.aggregate([
         {
           $match: {
-            schoolId: schoolId,
+            ...schoolMatch,
+            isDeleted: { $ne: true },
             status: { $in: ["Pending", "Partial"] },
           },
         },
         { $group: { _id: null, total: { $sum: { $subtract: ["$amount", "$paid"] } } } },
       ]),
       FeeInvoice.aggregate([
-        { $match: { schoolId: schoolId, status: "Overdue" } },
+        { $match: { ...schoolMatch, isDeleted: { $ne: true }, status: "Overdue" } },
         { $group: { _id: null, total: { $sum: { $subtract: ["$amount", "$paid"] } } } },
       ]),
       FeeInvoice.distinct("studentId", {
-        schoolId,
+        ...schoolMatch,
+        isDeleted: { $ne: true },
         status: { $in: ["Pending", "Partial", "Overdue"] },
       }).then((ids) => ids.length),
-      FeeInvoice.countDocuments({ schoolId, status: "Overdue" }),
+      FeeInvoice.countDocuments({ ...schoolMatch, isDeleted: { $ne: true }, status: "Overdue" }),
       FeeInvoice.aggregate([
         {
           $match: {
-            schoolId: schoolId,
+            ...schoolMatch,
+            isDeleted: { $ne: true },
             status: { $ne: "Cancelled" },
           },
         },
@@ -92,22 +109,34 @@ export const getDashboard = async (req, res, next) => {
     const totalDiscountGiven = totalDiscountResult[0]?.total ?? 0;
 
     const yearStart = new Date(now.getFullYear(), 0, 1);
-    const paymentsByMonth = await Payment.aggregate([
+    const invoicesByMonth = await FeeInvoice.aggregate([
       {
         $match: {
-          schoolId: schoolId,
-          paymentDate: { $gte: yearStart, $lte: now },
+          ...schoolMatch,
+          isDeleted: { $ne: true },
+          status: { $ne: "Cancelled" },
+          paid: { $gt: 0 },
+        },
+      },
+      {
+        $addFields: {
+          collectedAt: { $ifNull: ["$paidDate", "$createdAt"] },
+        },
+      },
+      {
+        $match: {
+          collectedAt: { $gte: yearStart, $lte: now },
         },
       },
       {
         $group: {
-          _id: { $month: "$paymentDate" },
-          collected: { $sum: "$amount" },
+          _id: { $month: "$collectedAt" },
+          collected: { $sum: "$paid" },
         },
       },
     ]);
     const byMonthMap = Object.fromEntries(
-      paymentsByMonth.map((x) => [x._id, x.collected])
+      invoicesByMonth.map((x) => [x._id, x.collected])
     );
     const monthlyCollection = MONTHS.map((month, i) => ({
       month,
@@ -116,7 +145,7 @@ export const getDashboard = async (req, res, next) => {
     }));
 
     const feeDistributionAgg = await FeeInvoice.aggregate([
-      { $match: { schoolId: schoolId, status: "Paid" } },
+      { $match: { ...schoolMatch, isDeleted: { $ne: true }, status: "Paid" } },
       { $group: { _id: "$feeTypeId", total: { $sum: "$paid" } } },
       { $sort: { total: -1 } },
       { $limit: 10 },
@@ -133,7 +162,7 @@ export const getDashboard = async (req, res, next) => {
       percent: totalPaidForPct > 0 ? Math.round((x.total / totalPaidForPct) * 100) : 0,
     }));
 
-    const recentInvoices = await FeeInvoice.find({ schoolId })
+    const recentInvoices = await FeeInvoice.find({ ...schoolMatch, isDeleted: { $ne: true } })
       .populate("studentId", "name className section")
       .populate("feeTypeId", "name")
       .sort({ createdAt: -1 })

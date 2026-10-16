@@ -7,6 +7,7 @@ const tcContentSchema = new mongoose.Schema(
     dob: { type: Date, default: null },
     fatherName: { type: String, trim: true, default: "" },
     motherName: { type: String, trim: true, default: "" },
+    address: { type: String, trim: true, default: "" },
     classLastAttended: { type: String, trim: true, default: "" },
     section: { type: String, trim: true, default: "" },
     academicSession: { type: String, trim: true, default: "" },

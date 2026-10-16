@@ -27,9 +27,10 @@ const SPECIAL_ALIASES = {
   "pre-primary": "pre-primary",
   preprimary: "pre-primary",
   nursery: "nursery",
+  nur: "nursery",
   kg: "kg",
-  "lkg": "lkg",
-  "ukg": "ukg",
+  lkg: "lkg",
+  ukg: "ukg",
   "lower kg": "lkg",
   "upper kg": "ukg",
 };
@@ -80,6 +81,13 @@ export function normalizeClassKey(value) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   return slug || null;
+}
+
+/** True when two class labels share the same canonical key (e.g. NUR / Nursery). */
+export function classNamesMatch(a, b) {
+  const ka = normalizeClassKey(a);
+  const kb = normalizeClassKey(b);
+  return Boolean(ka && kb && ka === kb);
 }
 
 /**

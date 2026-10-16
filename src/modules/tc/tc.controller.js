@@ -94,6 +94,7 @@ const buildGeneratedContent = (content = {}) => ({
   dob: toDate(content.dob),
   fatherName: toStr(content.fatherName),
   motherName: toStr(content.motherName),
+  address: toStr(content.address),
   classLastAttended: toStr(content.classLastAttended),
   section: toStr(content.section),
   academicSession: toStr(content.academicSession),
@@ -276,7 +277,7 @@ export const getTCList = async (req, res, next) => {
 
     const [items, total] = await Promise.all([
       TransferCertificate.find(filter)
-        .populate("studentId", "name admissionNumber className section rollNumber")
+        .populate("studentId", "name admissionNumber className section rollNumber address correspondenceAddress")
         .sort({ issueDate: -1, createdAt: -1 })
         .skip(skip)
         .limit(limitNo)
@@ -309,7 +310,7 @@ export const getTCById = async (req, res, next) => {
       _id: req.params.id,
       schoolId,
     })
-      .populate("studentId", "name admissionNumber className section rollNumber")
+      .populate("studentId", "name admissionNumber className section rollNumber address correspondenceAddress")
       .lean();
 
     if (!tc) {

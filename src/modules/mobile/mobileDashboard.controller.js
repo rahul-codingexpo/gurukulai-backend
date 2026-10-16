@@ -5,6 +5,10 @@ import ClassTimetable from "../classTimetable/classTimetable.model.js";
 import { formatEntrySubjects } from "../classTimetable/classTimetable.utils.js";
 import Event from "../events/event.model.js";
 import EventRead from "./eventRead.model.js";
+import {
+  applyLiveEventStatus,
+  persistStaleEventStatuses,
+} from "../../utils/eventStatus.util.js";
 
 const resolveSchoolId = async (req) => {
   const roleName = req.user?.roleId?.name;
@@ -140,7 +144,6 @@ export const getMobileDashboard = async (req, res, next) => {
 
     const events = await Event.find({
       schoolId,
-      status: { $in: ["UPCOMING", "ONGOING"] },
       organizationFor: { $in: ["ALL", orgFor] },
       endAt: { $gte: now },
     })
@@ -148,6 +151,8 @@ export const getMobileDashboard = async (req, res, next) => {
       .sort({ startAt: 1 })
       .limit(10)
       .lean();
+
+    persistStaleEventStatuses(events, now);
 
     res.json({
       success: true,
@@ -158,7 +163,7 @@ export const getMobileDashboard = async (req, res, next) => {
           role: roleName,
           profilePhoto,
         },
-        events,
+        events: events.map((event) => applyLiveEventStatus(event, now)),
       },
     });
   } catch (error) {
@@ -248,7 +253,6 @@ export const getTeacherDashboard = async (req, res, next) => {
     // Recent announcements/events
     const announcements = await Event.find({
       schoolId,
-      status: { $in: ["UPCOMING", "ONGOING"] },
       organizationFor: { $in: ["ALL", "TEACHERS"] },
       endAt: { $gte: now },
     })
@@ -256,6 +260,8 @@ export const getTeacherDashboard = async (req, res, next) => {
       .sort({ startAt: 1, createdAt: -1 })
       .limit(4)
       .lean();
+
+    persistStaleEventStatuses(announcements, now);
 
     return res.json({
       success: true,
@@ -280,7 +286,7 @@ export const getTeacherDashboard = async (req, res, next) => {
           hasMore: todayTimetable.length > 4,
           moreCount: Math.max(todayTimetable.length - 4, 0),
         },
-        announcements,
+        announcements: announcements.map((event) => applyLiveEventStatus(event, now)),
       },
     });
   } catch (error) {
@@ -321,7 +327,7 @@ export const getMobileEventById = async (req, res, next) => {
 
     return res.json({
       success: true,
-      data: event,
+      data: applyLiveEventStatus(event),
     });
   } catch (error) {
     next(error);
@@ -351,7 +357,6 @@ export const listMobileEvents = async (req, res, next) => {
       schoolId,
       organizationFor: { $in: ["ALL", orgFor] },
     };
-    if (status) eventFilter.status = status;
 
     // Read/unread filtering uses EventRead mapping for this user.
     if (filter === "read" || filter === "unread") {
@@ -369,6 +374,9 @@ export const listMobileEvents = async (req, res, next) => {
       .limit(200)
       .lean();
 
+    const now = new Date();
+    persistStaleEventStatuses(events, now);
+
     // Attach `isRead` flag for UI convenience
     const readSet =
       filter === "read"
@@ -381,9 +389,18 @@ export const listMobileEvents = async (req, res, next) => {
             ).map((r) => String(r.eventId))
           );
 
+    let data = events.map((e) => ({
+      ...applyLiveEventStatus(e, now),
+      isRead: readSet.has(String(e._id)),
+    }));
+    if (status) {
+      const wanted = String(status).trim().toUpperCase();
+      data = data.filter((event) => event.status === wanted);
+    }
+
     res.json({
       success: true,
-      data: events.map((e) => ({ ...e, isRead: readSet.has(String(e._id)) })),
+      data,
     });
   } catch (error) {
     next(error);
