@@ -83,11 +83,15 @@ const validateCreatePayload = (payload) => {
     return "name is required";
   }
 
-  if (
-    !designation ||
-    !ALLOWED_DESIGNATIONS.includes(String(designation).trim())
-  ) {
-    return `designation must be one of: ${ALLOWED_DESIGNATIONS.join(", ")}`;
+  const designationTrimmed = String(designation || "").trim();
+  if (!designationTrimmed) {
+    return "designation is required";
+  }
+  if (designationTrimmed.length > 80) {
+    return "designation must be at most 80 characters";
+  }
+  if (/^other$/i.test(designationTrimmed)) {
+    return "Please enter a custom designation (not Other)";
   }
 
   if (salary !== undefined && salary !== null && salary !== "") {

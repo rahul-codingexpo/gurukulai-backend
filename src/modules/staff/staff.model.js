@@ -23,19 +23,9 @@ const staffSchema = new mongoose.Schema(
 
     designation: {
       type: String,
-      enum: [
-        "Principal",
-        "Vice Principal",
-        "Teacher",
-        "Accountant",
-        "Librarian",
-        "Receptionist",
-        "Clerk",
-        "Peon",
-        "Driver",
-        "Staff",
-      ],
       required: true,
+      trim: true,
+      maxlength: 80,
     },
 
     joiningDate: {
