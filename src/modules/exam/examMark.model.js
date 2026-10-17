@@ -25,10 +25,10 @@ const examMarkSchema = new mongoose.Schema(
       ref: "Subject",
       required: true,
     },
-    /** Theory | Practical | Oral */
+    /** Theory | Practical | Oral | Grade (optional subject grade) */
     paperType: {
       type: String,
-      enum: ["Theory", "Practical", "Oral"],
+      enum: ["Theory", "Practical", "Oral", "Grade"],
       default: "Theory",
       trim: true,
     },

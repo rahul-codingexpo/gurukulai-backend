@@ -57,6 +57,7 @@ const normalizePaperType = (value) => {
   const raw = String(value || "").trim().toLowerCase();
   if (raw === "practical") return "Practical";
   if (raw === "oral") return "Oral";
+  if (raw === "grade") return "Grade";
   if (raw === "theory" || raw === "written") return "Theory";
   return "Theory";
 };
@@ -741,7 +742,51 @@ export const upsertExamMarks = async (req, res, next) => {
             : { Theory: cell };
 
         for (const [rawType, rawVal] of Object.entries(paperValues)) {
-          const paperType = normalizePaperType(rawType);
+          const isGradeKey = String(rawType).trim().toLowerCase() === "grade";
+          const paperType = isGradeKey ? "Grade" : normalizePaperType(rawType);
+
+          // Optional subject grade (letters like A+, O, B) — not a marks paper.
+          if (paperType === "Grade") {
+            const grade = String(rawVal ?? "")
+              .trim()
+              .toUpperCase()
+              .slice(0, 8);
+            if (grade === "") {
+              ops.push({
+                deleteOne: {
+                  filter: {
+                    schoolId,
+                    examId: exam._id,
+                    studentId,
+                    subjectId,
+                    paperType: "Grade",
+                  },
+                },
+              });
+              continue;
+            }
+            if (!/^[A-Z0-9+\-]{1,8}$/.test(grade)) {
+              return res.status(400).json({
+                success: false,
+                message: `Invalid grade for subject ${subjectId}`,
+              });
+            }
+            ops.push({
+              updateOne: {
+                filter: {
+                  schoolId,
+                  examId: exam._id,
+                  studentId,
+                  subjectId,
+                  paperType: "Grade",
+                },
+                update: { $set: { value: grade, paperType: "Grade" } },
+                upsert: true,
+              },
+            });
+            continue;
+          }
+
           if (!rule.papers[paperType]) {
             return res.status(400).json({
               success: false,
@@ -749,13 +794,26 @@ export const upsertExamMarks = async (req, res, next) => {
             });
           }
           const raw = String(rawVal ?? "").trim().toUpperCase();
-          if (raw === "") continue;
+          if (raw === "") {
+            ops.push({
+              deleteOne: {
+                filter: {
+                  schoolId,
+                  examId: exam._id,
+                  studentId,
+                  subjectId,
+                  paperType,
+                },
+              },
+            });
+            continue;
+          }
           if (raw !== "AB") {
             const n = Number(raw);
             if (Number.isNaN(n)) {
               return res.status(400).json({
                 success: false,
-                message: `Invalid marks value for subject ${subjectId} (${paperType})`,
+                message: `Invalid marks value for subject ${subjectId} (${paperType}). Enter numbers or AB only.`,
               });
             }
             const maxMarks = rule.papers[paperType].maxMarks;
