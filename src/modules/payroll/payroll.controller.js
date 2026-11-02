@@ -2,7 +2,11 @@ import SalarySlip from "./salarySlip.model.js";
 import SalaryPayment from "./salaryPayment.model.js";
 import Staff from "../staff/staff.model.js";
 import School from "../school/school.model.js";
+import StaffAttendance from "../attendance/staffAttendance.model.js";
 import { normalizeWhatsAppPhone } from "../../utils/phone.util.js";
+
+/** Daily salary is monthly salary divided by 30 (₹30,000 → ₹1,000 per day). */
+const SALARY_MONTH_DAYS = 30;
 
 const MONTH_NAMES = [
   "January",
@@ -36,6 +40,60 @@ const requireSchool = (req, res) => {
 };
 
 const periodLabelOf = (month, year) => `${MONTH_NAMES[month - 1] || month} ${year}`;
+
+const monthDateRange = (year, month) => {
+  const start = new Date(year, month - 1, 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(year, month, 1);
+  end.setHours(0, 0, 0, 0);
+  return { start, end };
+};
+
+/**
+ * Payable = monthly salary − (absent days × daily salary).
+ * Daily salary = monthly salary / 30. Unmarked days are not treated as absent.
+ */
+const calculateAttendancePay = (monthlySalary, presentDays, absentDays) => {
+  const monthly = roundMoney(monthlySalary);
+  const present = Math.max(0, Number(presentDays) || 0);
+  const absent = Math.max(0, Number(absentDays) || 0);
+  const attendanceDeduction = roundMoney(
+    Math.min(monthly, (monthly / SALARY_MONTH_DAYS) * absent),
+  );
+  return {
+    monthlySalary: monthly,
+    salaryDays: SALARY_MONTH_DAYS,
+    dailySalary: roundMoney(monthly / SALARY_MONTH_DAYS),
+    presentDays: present,
+    absentDays: absent,
+    attendanceDeduction,
+    payable: roundMoney(Math.max(0, monthly - attendanceDeduction)),
+  };
+};
+
+const attendanceCountsForMonth = async (schoolId, staffIds, month, year) => {
+  const counts = new Map();
+  staffIds.forEach((id) => {
+    counts.set(String(id), { presentDays: 0, absentDays: 0 });
+  });
+  if (!staffIds.length) return counts;
+  const { start, end } = monthDateRange(year, month);
+  const records = await StaffAttendance.find({
+    schoolId,
+    staffId: { $in: staffIds },
+    date: { $gte: start, $lt: end },
+  })
+    .select("staffId status")
+    .lean();
+  records.forEach((row) => {
+    const key = String(row.staffId);
+    if (!counts.has(key)) counts.set(key, { presentDays: 0, absentDays: 0 });
+    const bucket = counts.get(key);
+    if (row.status === "Absent") bucket.absentDays += 1;
+    else bucket.presentDays += 1;
+  });
+  return counts;
+};
 
 const getNextSlipNumber = async (schoolId, year, month) => {
   const prefix = `SAL-${year}-${String(month).padStart(2, "0")}-`;
@@ -162,6 +220,47 @@ export const getSalarySlipById = async (req, res, next) => {
   }
 };
 
+export const getAttendanceSalarySummary = async (req, res, next) => {
+  try {
+    if (!requireSchool(req, res)) return;
+    const month = Number(req.query?.month);
+    const year = Number(req.query?.year);
+    if (!month || month < 1 || month > 12 || !year) {
+      return res.status(400).json({ success: false, message: "Valid month and year are required" });
+    }
+    const staffList = await Staff.find({ schoolId: req.schoolId, status: "ACTIVE" })
+      .select("name designation salary")
+      .lean();
+    const counts = await attendanceCountsForMonth(
+      req.schoolId,
+      staffList.map((staff) => staff._id),
+      month,
+      year,
+    );
+    const staff = staffList.map((row) => {
+      const attendance = counts.get(String(row._id)) || { presentDays: 0, absentDays: 0 };
+      const pay = calculateAttendancePay(row.salary || 0, attendance.presentDays, attendance.absentDays);
+      return {
+        staffId: row._id,
+        name: row.name,
+        designation: row.designation || "",
+        ...pay,
+      };
+    });
+    res.json({
+      success: true,
+      data: {
+        month,
+        year,
+        salaryDays: SALARY_MONTH_DAYS,
+        staff,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const generateMonthlySalaries = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
@@ -210,6 +309,12 @@ export const generateMonthlySalaries = async (req, res, next) => {
     const dueDate = req.body?.dueDate ? new Date(req.body.dueDate) : new Date(year, month, 0);
     const created = [];
     const skipped = [];
+    const attendanceByStaff = await attendanceCountsForMonth(
+      req.schoolId,
+      staffList.map((staff) => staff._id),
+      month,
+      year,
+    );
 
     for (const staff of staffList) {
       if (existingIds.has(String(staff._id))) {
@@ -218,15 +323,17 @@ export const generateMonthlySalaries = async (req, res, next) => {
       }
       const staffKey = String(staff._id);
       const manualAmount = salaryByStaffId.has(staffKey) ? salaryByStaffId.get(staffKey) : null;
-      const baseSalary = roundMoney(
+      const monthlySalary = roundMoney(
         manualAmount != null && Number.isFinite(manualAmount) ? manualAmount : staff.salary || 0,
       );
-      if (baseSalary <= 0) {
+      if (monthlySalary <= 0) {
         skipped.push({ staffId: staff._id, name: staff.name, reason: "Salary amount is required" });
         continue;
       }
+      const attendance = attendanceByStaff.get(staffKey) || { presentDays: 0, absentDays: 0 };
+      const pay = calculateAttendancePay(monthlySalary, attendance.presentDays, attendance.absentDays);
       const allowances = roundMoney(req.body?.allowances || 0);
-      const deductions = roundMoney(req.body?.deductions || 0);
+      const extraDeductions = roundMoney(req.body?.deductions || 0);
       const slip = await SalarySlip.create({
         schoolId: req.schoolId,
         slipNumber: await getNextSlipNumber(req.schoolId, year, month),
@@ -236,9 +343,15 @@ export const generateMonthlySalaries = async (req, res, next) => {
         periodMonth: month,
         periodYear: year,
         periodLabel: periodLabelOf(month, year),
-        baseSalary,
+        baseSalary: pay.monthlySalary,
+        monthlySalary: pay.monthlySalary,
+        salaryDays: pay.salaryDays,
+        dailySalary: pay.dailySalary,
+        presentDays: pay.presentDays,
+        absentDays: pay.absentDays,
+        attendanceDeduction: pay.attendanceDeduction,
         allowances,
-        deductions,
+        deductions: roundMoney(pay.attendanceDeduction + extraDeductions),
         dueDate,
         remarks: req.body?.remarks ? String(req.body.remarks).trim() : "",
         generatedBy: req.user?._id || null,
@@ -297,6 +410,10 @@ export const createSalarySlip = async (req, res, next) => {
         message: "Salary slip already exists for this staff and month",
       });
     }
+    const monthlySalary = roundMoney(baseSalary != null ? baseSalary : staff.salary || 0);
+    const counts = await attendanceCountsForMonth(req.schoolId, [staff._id], periodMonth, periodYear);
+    const attendance = counts.get(String(staff._id)) || { presentDays: 0, absentDays: 0 };
+    const pay = calculateAttendancePay(monthlySalary, attendance.presentDays, attendance.absentDays);
     const slip = await SalarySlip.create({
       schoolId: req.schoolId,
       slipNumber: await getNextSlipNumber(req.schoolId, periodYear, periodMonth),
@@ -306,9 +423,15 @@ export const createSalarySlip = async (req, res, next) => {
       periodMonth,
       periodYear,
       periodLabel: periodLabelOf(periodMonth, periodYear),
-      baseSalary: baseSalary != null ? baseSalary : staff.salary || 0,
+      baseSalary: pay.monthlySalary,
+      monthlySalary: pay.monthlySalary,
+      salaryDays: pay.salaryDays,
+      dailySalary: pay.dailySalary,
+      presentDays: pay.presentDays,
+      absentDays: pay.absentDays,
+      attendanceDeduction: pay.attendanceDeduction,
       allowances,
-      deductions,
+      deductions: roundMoney(pay.attendanceDeduction + roundMoney(deductions)),
       dueDate: dueDate ? new Date(dueDate) : new Date(periodYear, periodMonth, 0),
       remarks: remarks ? String(remarks).trim() : "",
       generatedBy: req.user?._id || null,
@@ -429,7 +552,11 @@ export const prepareSalaryWhatsApp = async (req, res, next) => {
       `*Slip No:* ${slip.slipNumber}`,
       `*Period:* ${slip.periodLabel}`,
       `*Designation:* ${slip.designation || "—"}`,
-      `*Base Salary:* ${formatInrPlain(slip.baseSalary)}`,
+      `*Monthly Salary:* ${formatInrPlain(slip.monthlySalary || slip.baseSalary)}`,
+      `*Present Days:* ${Number(slip.presentDays || 0)}`,
+      `*Absent Days:* ${Number(slip.absentDays || 0)}`,
+      `*Daily Salary:* ${formatInrPlain(slip.dailySalary || 0)}`,
+      `*Absent Deduction:* ${formatInrPlain(slip.attendanceDeduction || 0)}`,
       `*Allowances:* ${formatInrPlain(slip.allowances)}`,
       `*Deductions:* ${formatInrPlain(slip.deductions)}`,
       `*Net Salary:* ${formatInrPlain(slip.netAmount)}`,

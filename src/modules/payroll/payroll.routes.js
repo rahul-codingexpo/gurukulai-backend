@@ -6,6 +6,7 @@ import {
   getPayrollDashboard,
   listSalarySlips,
   getSalarySlipById,
+  getAttendanceSalarySummary,
   generateMonthlySalaries,
   createSalarySlip,
   updateSalarySlip,
@@ -20,6 +21,14 @@ const writeAccess = ["Admin", "Principal", "Accountant"];
 
 router.get("/payroll/dashboard", protect, authorize(...readAccess), injectSchool, injectBranchSchoolScope, getPayrollDashboard);
 router.get("/payroll/slips", protect, authorize(...readAccess), injectSchool, injectBranchSchoolScope, listSalarySlips);
+router.get(
+  "/payroll/attendance-summary",
+  protect,
+  authorize(...readAccess),
+  injectSchool,
+  injectBranchSchoolScope,
+  getAttendanceSalarySummary,
+);
 router.get("/payroll/slips/:id", protect, authorize(...readAccess), injectSchool, injectBranchSchoolScope, getSalarySlipById);
 router.post("/payroll/slips/generate", protect, authorize(...writeAccess), injectSchool, injectBranchSchoolScope, generateMonthlySalaries);
 router.post("/payroll/slips", protect, authorize(...writeAccess), injectSchool, injectBranchSchoolScope, createSalarySlip);

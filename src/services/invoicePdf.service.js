@@ -85,6 +85,11 @@ const feeTypeIdOf = (row) => {
 };
 
 const feeTypeNameOf = (row) => {
+  if (row?.isLegacyDue) {
+    const ft = row?.feeTypeId;
+    if (ft && typeof ft === "object" && ft.name) return String(ft.name).trim();
+    return "Past Dues";
+  }
   const ft = row?.feeTypeId;
   if (ft && typeof ft === "object" && ft.name) return String(ft.name).trim();
   return String(row?.remarks || "Fee").trim() || "Fee";
@@ -160,13 +165,12 @@ export async function buildInvoicePdfBuffer({
   const recognition = sch.runUnder || "";
   const serialNo = String(primary.invoiceNumber || "").replace(/^INV-/i, "") || "—";
 
-  const normalizedLines = lines.map((row) => ({
-    ...row,
-    feeTypeId:
-      typeof row.feeTypeId === "object" && row.feeTypeId
-        ? row.feeTypeId
-        : feeType || row.feeTypeId,
-  }));
+  const normalizedLines = lines.map((row) => {
+    if (typeof row.feeTypeId === "object" && row.feeTypeId) return row;
+    if (row.feeTypeId) return row;
+    if (row.isLegacyDue) return { ...row, feeTypeId: { name: "Past Dues" } };
+    return { ...row, feeTypeId: feeType || row.feeTypeId };
+  });
   const feeRows = buildParticularsRows(normalizedLines);
 
   const totals = lines.reduce(

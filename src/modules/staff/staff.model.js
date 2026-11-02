@@ -32,6 +32,12 @@ const staffSchema = new mongoose.Schema(
       type: Date,
     },
 
+    /** Optional date of birth. */
+    dob: {
+      type: Date,
+      default: null,
+    },
+
     status: {
       type: String,
       enum: ["ACTIVE", "INACTIVE"],

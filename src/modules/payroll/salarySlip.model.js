@@ -25,6 +25,14 @@ const salarySlipSchema = new mongoose.Schema(
     periodYear: { type: Number, required: true, min: 2000 },
     periodLabel: { type: String, required: true, trim: true },
     baseSalary: { type: Number, required: true, min: 0, default: 0 },
+    /** Full monthly salary before attendance deduction. */
+    monthlySalary: { type: Number, min: 0, default: 0 },
+    /** Days used to derive daily salary. Attendance pay uses 30. */
+    salaryDays: { type: Number, min: 1, default: 30 },
+    dailySalary: { type: Number, min: 0, default: 0 },
+    presentDays: { type: Number, min: 0, default: 0 },
+    absentDays: { type: Number, min: 0, default: 0 },
+    attendanceDeduction: { type: Number, min: 0, default: 0 },
     allowances: { type: Number, required: true, min: 0, default: 0 },
     deductions: { type: Number, required: true, min: 0, default: 0 },
     netAmount: { type: Number, required: true, min: 0, default: 0 },

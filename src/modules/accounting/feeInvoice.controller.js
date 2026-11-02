@@ -704,8 +704,7 @@ export const prepareManualWhatsApp = async (req, res, next) => {
       .lean();
     const schoolName = school?.name || "School";
 
-    const hasNormal = invoices.some((inv) => !inv.isLegacyDue);
-    const pdfInvoices = hasNormal ? invoices.filter((inv) => !inv.isLegacyDue) : invoices;
+    const pdfInvoices = invoices;
 
     const pdfUrl = await ensureInvoicePdf(
       pdfInvoices[0],

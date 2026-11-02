@@ -77,7 +77,7 @@ const resolveRoleNameForDesignation = (designation) =>
   DESIGNATION_TO_ROLE[String(designation || "").trim()] || "Staff";
 
 const validateCreatePayload = (payload) => {
-  const { name, designation, salary, joiningDate, status } = payload;
+  const { name, designation, salary, joiningDate, dob, status } = payload;
 
   if (!name || String(name).trim() === "") {
     return "name is required";
@@ -103,6 +103,11 @@ const validateCreatePayload = (payload) => {
   if (joiningDate !== undefined && joiningDate !== null && joiningDate !== "") {
     const jd = new Date(joiningDate);
     if (Number.isNaN(jd.getTime())) return "joiningDate must be a valid date";
+  }
+
+  if (dob !== undefined && dob !== null && dob !== "") {
+    const birth = new Date(dob);
+    if (Number.isNaN(birth.getTime())) return "dob must be a valid date";
   }
 
   if (status !== undefined && status !== null && status !== "") {
@@ -276,6 +281,7 @@ export const createStaff = async (req, res, next) => {
       salary,
       designation,
       joiningDate,
+      dob,
       status,
       username,
       password,
@@ -285,6 +291,7 @@ export const createStaff = async (req, res, next) => {
     const normalizedDesignation = String(designation).trim();
     const normalizedStatus = optionalTrimmedValue(status)?.toUpperCase();
     const normalizedJoiningDate = optionalTrimmedValue(joiningDate);
+    const normalizedDob = optionalTrimmedValue(dob);
     const salaryNum =
       salary !== undefined && salary !== null && salary !== ""
         ? Number(salary)
@@ -304,6 +311,7 @@ export const createStaff = async (req, res, next) => {
       designation: normalizedDesignation,
       salary,
       joiningDate,
+      dob: normalizedDob,
       status: normalizedStatus,
     });
     if (payloadError) {
@@ -379,6 +387,7 @@ export const createStaff = async (req, res, next) => {
       ...(salaryNum !== undefined ? { salary: salaryNum } : {}),
       designation: normalizedDesignation,
       ...(normalizedJoiningDate ? { joiningDate: new Date(normalizedJoiningDate) } : {}),
+      ...(normalizedDob ? { dob: new Date(normalizedDob) } : {}),
       ...(normalizedStatus ? { status: normalizedStatus } : {}),
       userId: user?._id,
       schoolId,
@@ -493,6 +502,21 @@ export const updateStaff = async (req, res, next) => {
     if (updatePayload.joiningDate !== undefined) {
       const jd = new Date(updatePayload.joiningDate);
       if (!Number.isNaN(jd.getTime())) updatePayload.joiningDate = jd;
+    }
+
+    if (updatePayload.dob !== undefined) {
+      if (!updatePayload.dob) {
+        updatePayload.dob = null;
+      } else {
+        const birth = new Date(updatePayload.dob);
+        if (Number.isNaN(birth.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: "dob must be a valid date",
+          });
+        }
+        updatePayload.dob = birth;
+      }
     }
 
     if (req.files?.photo?.[0]) {
