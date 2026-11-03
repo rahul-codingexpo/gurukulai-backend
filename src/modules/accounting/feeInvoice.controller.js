@@ -461,6 +461,8 @@ export const getInvoices = async (req, res, next) => {
       fromDate,
       toDate,
       search,
+      className,
+      section,
       page = 1,
       limit = 20,
     } = req.query;
@@ -474,11 +476,28 @@ export const getInvoices = async (req, res, next) => {
       if (fromDate) filter.dueDate.$gte = new Date(fromDate);
       if (toDate) filter.dueDate.$lte = new Date(toDate);
     }
+
+    const classNameFilter = className != null ? String(className).trim() : "";
+    const sectionFilter = section != null ? String(section).trim() : "";
+    if (classNameFilter || sectionFilter) {
+      const studentMatch = { ...schoolIdFilter(req) };
+      if (classNameFilter) studentMatch.className = classNameFilter;
+      if (sectionFilter) studentMatch.section = sectionFilter;
+      const matchingStudents = await Student.find(studentMatch).select("_id").lean();
+      const classSectionIds = matchingStudents.map((x) => x._id);
+      // No matching students → empty invoice page (keep pagination totals at 0)
+      filter.studentId = studentId
+        ? studentId
+        : { $in: classSectionIds };
+    }
+
     if (search && String(search).trim()) {
       const s = String(search).trim();
       const matchingStudents = await Student.find({
         ...schoolIdFilter(req),
         name: new RegExp(s, "i"),
+        ...(classNameFilter ? { className: classNameFilter } : {}),
+        ...(sectionFilter ? { section: sectionFilter } : {}),
       })
         .select("_id")
         .lean();
@@ -487,6 +506,15 @@ export const getInvoices = async (req, res, next) => {
         { invoiceNumber: new RegExp(s, "i") },
         { studentId: { $in: ids } },
       ];
+      // When class/section already narrowed studentId, intersect with search hits
+      if (filter.studentId && filter.studentId.$in) {
+        const allowed = new Set(filter.studentId.$in.map((id) => String(id)));
+        filter.$or = [
+          { invoiceNumber: new RegExp(s, "i"), studentId: { $in: filter.studentId.$in } },
+          { studentId: { $in: ids.filter((id) => allowed.has(String(id))) } },
+        ];
+        delete filter.studentId;
+      }
     }
     const skip = (Math.max(1, parseInt(page, 10)) - 1) * Math.max(1, parseInt(limit, 10));
     const total = await FeeInvoice.countDocuments(filter);

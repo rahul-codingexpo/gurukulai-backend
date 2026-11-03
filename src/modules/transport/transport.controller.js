@@ -568,7 +568,7 @@ export const listBusRouteAssignments = async (req, res, next) => {
     if (req.query.status) filter.status = normalizeStatus(req.query.status);
     else if (req.query.includeHistory !== "true") filter.status = "active";
     const items = await BusRouteAssignment.find(filter)
-      .populate("busId", "busIdentity busName registrationNumber status")
+      .populate("busId", "busCode busIdentity busName registrationNumber status")
       .populate("routeId", "routeName routeCode status")
       .sort({ createdAt: -1 })
       .lean();
