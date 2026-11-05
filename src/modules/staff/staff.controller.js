@@ -46,19 +46,6 @@ const optionalTrimmedValue = (value) => {
   return trimmed === "" ? undefined : trimmed;
 };
 
-const ALLOWED_DESIGNATIONS = [
-  "Principal",
-  "Vice Principal",
-  "Teacher",
-  "Accountant",
-  "Librarian",
-  "Receptionist",
-  "Clerk",
-  "Peon",
-  "Driver",
-  "Staff",
-];
-
 /** Map staff designation → User Role.name (Role enum has no Vice Principal / Receptionist / etc.). */
 const DESIGNATION_TO_ROLE = {
   Principal: "Principal",
@@ -71,13 +58,15 @@ const DESIGNATION_TO_ROLE = {
   Peon: "Staff",
   Driver: "Staff",
   Staff: "Staff",
+  Other: "Staff",
 };
 
 const resolveRoleNameForDesignation = (designation) =>
   DESIGNATION_TO_ROLE[String(designation || "").trim()] || "Staff";
 
 const validateCreatePayload = (payload) => {
-  const { name, designation, salary, joiningDate, dob, status } = payload;
+  const { name, designation, salary, joiningDate, dob, status, customDesignation } =
+    payload;
 
   if (!name || String(name).trim() === "") {
     return "name is required";
@@ -90,8 +79,11 @@ const validateCreatePayload = (payload) => {
   if (designationTrimmed.length > 80) {
     return "designation must be at most 80 characters";
   }
-  if (/^other$/i.test(designationTrimmed)) {
-    return "Please enter a custom designation (not Other)";
+
+  if (String(designation).trim() === "Other") {
+    if (!customDesignation || String(customDesignation).trim() === "") {
+      return "customDesignation is required when designation is Other";
+    }
   }
 
   if (salary !== undefined && salary !== null && salary !== "") {
@@ -280,6 +272,7 @@ export const createStaff = async (req, res, next) => {
       phone,
       salary,
       designation,
+      customDesignation,
       joiningDate,
       dob,
       status,
@@ -289,6 +282,8 @@ export const createStaff = async (req, res, next) => {
     const normalizedEmail = optionalTrimmedValue(email);
     const normalizedPhone = optionalTrimmedValue(phone);
     const normalizedDesignation = String(designation).trim();
+    const normalizedCustomDesignation =
+      optionalTrimmedValue(customDesignation) || "";
     const normalizedStatus = optionalTrimmedValue(status)?.toUpperCase();
     const normalizedJoiningDate = optionalTrimmedValue(joiningDate);
     const normalizedDob = optionalTrimmedValue(dob);
@@ -309,6 +304,7 @@ export const createStaff = async (req, res, next) => {
     const payloadError = validateCreatePayload({
       name,
       designation: normalizedDesignation,
+      customDesignation: normalizedCustomDesignation,
       salary,
       joiningDate,
       dob: normalizedDob,
@@ -347,12 +343,13 @@ export const createStaff = async (req, res, next) => {
     let user = null;
 
     if (username && password) {
-      const role = await Role.findOne({ name: normalizedDesignation });
+      const roleName = resolveRoleNameForDesignation(normalizedDesignation);
+      const role = await Role.findOne({ name: roleName });
 
       if (!role) {
         return res.status(404).json({
           success: false,
-          message: "Role not found",
+          message: `Role not found for designation "${normalizedDesignation}" (expected role: ${roleName})`,
         });
       }
 
@@ -386,6 +383,8 @@ export const createStaff = async (req, res, next) => {
       ...(normalizedPhone ? { phone: normalizedPhone } : {}),
       ...(salaryNum !== undefined ? { salary: salaryNum } : {}),
       designation: normalizedDesignation,
+      customDesignation:
+        normalizedDesignation === "Other" ? normalizedCustomDesignation : "",
       ...(normalizedJoiningDate ? { joiningDate: new Date(normalizedJoiningDate) } : {}),
       ...(normalizedDob ? { dob: new Date(normalizedDob) } : {}),
       ...(normalizedStatus ? { status: normalizedStatus } : {}),
@@ -467,6 +466,40 @@ export const updateStaff = async (req, res, next) => {
     }
     if (updatePayload.phone !== undefined) {
       updatePayload.phone = optionalTrimmedValue(updatePayload.phone);
+    }
+    if (updatePayload.customDesignation !== undefined) {
+      updatePayload.customDesignation =
+        optionalTrimmedValue(updatePayload.customDesignation) || "";
+    }
+    if (updatePayload.designation !== undefined) {
+      const nextDesignation = String(updatePayload.designation).trim();
+      if (!nextDesignation) {
+        return res.status(400).json({
+          success: false,
+          message: "designation is required",
+        });
+      }
+      if (nextDesignation.length > 80) {
+        return res.status(400).json({
+          success: false,
+          message: "designation must be at most 80 characters",
+        });
+      }
+      updatePayload.designation = nextDesignation;
+      if (nextDesignation === "Other") {
+        const custom =
+          updatePayload.customDesignation !== undefined
+            ? updatePayload.customDesignation
+            : existingStaff.customDesignation;
+        if (!custom || String(custom).trim() === "") {
+          return res.status(400).json({
+            success: false,
+            message: "customDesignation is required when designation is Other",
+          });
+        }
+      } else if (updatePayload.customDesignation === undefined) {
+        updatePayload.customDesignation = "";
+      }
     }
 
     let linkedUserId;

@@ -1,6 +1,8 @@
 import Student from "../student/student.model.js";
 import Staff from "../staff/staff.model.js";
 import School from "../school/school.model.js";
+import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 
@@ -195,6 +197,64 @@ export const getMobileProfile = async (req, res, next) => {
     return res.status(403).json({
       success: false,
       message: "Only Student, Parent, Teacher, and Staff can access this endpoint",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** POST /api/mobile/profile/photo — Student only; multipart field `studentPhoto` */
+export const uploadMobileProfilePhoto = async (req, res, next) => {
+  try {
+    const role = roleNameOf(req);
+    if (role !== "Student") {
+      return res.status(403).json({
+        success: false,
+        message: "Only Student can upload a profile photo",
+      });
+    }
+
+    // Resolve solely from the authenticated user's studentLogin link.
+    const student = await Student.findOne({
+      "studentLogin.userId": req.user._id,
+    });
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found",
+      });
+    }
+
+    const file = req.files?.studentPhoto?.[0];
+    const photoUrl = uploadedFileUrl(file);
+    if (!photoUrl) {
+      return res.status(400).json({
+        success: false,
+        message: "studentPhoto file is required (png, jpg, jpeg, or webp)",
+      });
+    }
+
+    student.documents = student.documents || {};
+    const previous = student.documents.studentPhoto;
+    student.documents.studentPhoto = photoUrl;
+    await student.save();
+
+    if (previous && previous !== photoUrl) {
+      try {
+        await deleteFromSpacesByUrl(previous);
+      } catch {
+        // Best-effort cleanup; do not fail the upload response.
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: "Profile photo updated",
+      data: {
+        profilePhoto: photoUrl,
+        photo: photoUrl,
+        photoUrl,
+      },
     });
   } catch (error) {
     next(error);

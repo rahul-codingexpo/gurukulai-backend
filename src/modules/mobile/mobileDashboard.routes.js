@@ -7,7 +7,10 @@ import {
   listMobileEvents,
   markMobileEventRead,
 } from "./mobileDashboard.controller.js";
-import { getMobileProfile } from "./mobileProfile.controller.js";
+import {
+  getMobileProfile,
+  uploadMobileProfilePhoto,
+} from "./mobileProfile.controller.js";
 import {
   getMobileStudentAttendanceMonth,
   getMobileStaffAttendanceMonth,
@@ -21,7 +24,11 @@ import {
   getMobileTimetable,
   getMobileTimetableCourses,
 } from "./mobileTimetable.controller.js";
-import { mobileGetExamMarks, getExamStudents } from "../exam/exam.controller.js";
+import {
+  mobileGetExamMarks,
+  mobileUpsertExamMarks,
+  getExamStudents,
+} from "../exam/exam.controller.js";
 import { listMobileExams, getMobileExamById } from "./mobileExam.controller.js";
 import { mobileQuizRoutes } from "../quiz/quizQuestion.routes.js";
 import { getGalleryList, getGalleryById } from "../gallery/gallery.controller.js";
@@ -47,7 +54,10 @@ import {
   listPendingStaffLeavesMobile,
   updateStaffLeaveStatusMobile,
 } from "./mobileLeaves.controller.js";
-import { uploadStudyMaterials } from "../../middleware/upload.middleware.js";
+import {
+  uploadStudyMaterials,
+  uploadStudentProfilePhoto,
+} from "../../middleware/upload.middleware.js";
 import {
   askTeacherOnHomework,
   listMobileHomework,
@@ -66,8 +76,22 @@ import {
   getMobileStudyMaterialById,
   createMobileStudyMaterial,
 } from "./mobileStudyMaterial.controller.js";
-import { listMobileClasses } from "./mobileClasses.controller.js";
+import {
+  listMobileClasses,
+  listMobileSections,
+} from "./mobileClasses.controller.js";
 import { getMobileGuardian } from "./mobileGuardian.controller.js";
+import { listMobileTeachers } from "./mobileTeachers.controller.js";
+import {
+  getMobileFeeHistory,
+  getMobileInvoices,
+} from "./mobileFees.controller.js";
+import {
+  getMobileAdmitCard,
+  listMobileAdmitCardChildren,
+} from "./mobileAdmitCard.controller.js";
+import { createMobileEvent, listMobileHolidays } from "./mobileHolidays.controller.js";
+import { getMobileTransport } from "./mobileTransport.controller.js";
 
 const router = express.Router();
 const mobileOnly = (req, res, next) => {
@@ -88,11 +112,45 @@ router.get("/dashboard/teacher", protect, mobileOnly, getTeacherDashboard);
 // Mobile profile (header avatar -> profile screen)
 router.get("/profile", protect, mobileOnly, getMobileProfile);
 
+// Student self profile photo upload (do not reuse Admin PUT /students/:id)
+router.post(
+  "/profile/photo",
+  protect,
+  mobileOnly,
+  uploadStudentProfilePhoto.fields([{ name: "studentPhoto", maxCount: 1 }]),
+  uploadMobileProfilePhoto,
+);
+
 // Guardian details (Student/Parent)
 router.get("/guardian", protect, mobileOnly, getMobileGuardian);
 
 // Classes list (mobile — replaces web GET /classes for app)
 router.get("/classes", protect, mobileOnly, listMobileClasses);
+
+// Sections list (mobile — replaces web GET /sections for app)
+router.get("/sections", protect, mobileOnly, listMobileSections);
+
+// Teachers / staff contacts (mobile)
+router.get("/teachers", protect, mobileOnly, listMobileTeachers);
+
+// Fees / invoices (Student / Parent)
+router.get("/fees/history", protect, mobileOnly, getMobileFeeHistory);
+router.get("/invoices", protect, mobileOnly, getMobileInvoices);
+
+// Admit card (Student / Parent) — dedicated route (not under /exams/:examId)
+router.get(
+  "/admit-card/children",
+  protect,
+  mobileOnly,
+  listMobileAdmitCardChildren,
+);
+router.get("/admit-card", protect, mobileOnly, getMobileAdmitCard);
+
+// Holidays calendar (maps school events)
+router.get("/holidays", protect, mobileOnly, listMobileHolidays);
+
+// Student transport / bus details
+router.get("/transport", protect, mobileOnly, getMobileTransport);
 
 // Study materials (mobile)
 router.get("/study-materials", protect, mobileOnly, listMobileStudyMaterials);
@@ -104,6 +162,9 @@ router.post(
   uploadStudyMaterials.fields([{ name: "files", maxCount: 10 }]),
   createMobileStudyMaterial,
 );
+
+// Teacher/Staff add a calendar event. Registered before /events/:id.
+router.post("/events", protect, mobileOnly, createMobileEvent);
 
 // Mobile events list (filter=all|read|unread)
 router.get("/events", protect, mobileOnly, listMobileEvents);
@@ -180,6 +241,8 @@ router.get("/exams", protect, mobileOnly, listMobileExams);
 router.get("/exams/:examId", protect, mobileOnly, getMobileExamById);
 router.get("/exams/:examId/students", protect, mobileOnly, getExamStudents);
 router.get("/exams/:examId/marks", protect, mobileOnly, mobileGetExamMarks);
+router.put("/exams/:examId/marks", protect, mobileOnly, mobileUpsertExamMarks);
+router.post("/exams/:examId/marks", protect, mobileOnly, mobileUpsertExamMarks);
 
 // -------- MCQ Quizzes (Mobile) --------
 router.use("/quiz", protect, mobileOnly, mobileQuizRoutes);

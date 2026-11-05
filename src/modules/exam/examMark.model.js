@@ -32,9 +32,16 @@ const examMarkSchema = new mongoose.Schema(
       default: "Theory",
       trim: true,
     },
+    /** Theory / written marks (legacy single field). */
     value: {
       type: String,
       required: true,
+      trim: true,
+    },
+    /** Optional practical marks when exam subject has hasPractical. */
+    practicalValue: {
+      type: String,
+      default: null,
       trim: true,
     },
   },

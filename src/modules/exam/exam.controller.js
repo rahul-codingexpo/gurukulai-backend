@@ -678,7 +678,7 @@ export const getExamMarks = async (req, res, next) => {
     if (req.query.studentId) filter.studentId = req.query.studentId;
 
     const marks = await ExamMark.find(filter)
-      .select("studentId subjectId paperType value")
+      .select("studentId subjectId paperType value practicalValue")
       .lean();
     const data = {};
     for (const m of marks) {
@@ -687,12 +687,31 @@ export const getExamMarks = async (req, res, next) => {
       const paperType = normalizePaperType(m.paperType);
       if (!data[sid]) data[sid] = {};
       const existing = data[sid][sub];
+      let cell;
       if (existing && typeof existing === "object") {
         existing[paperType] = m.value;
+        cell = existing;
       } else if (existing != null && existing !== "") {
-        data[sid][sub] = { Theory: String(existing), [paperType]: m.value };
+        cell = { Theory: String(existing), [paperType]: m.value };
+        data[sid][sub] = cell;
       } else {
-        data[sid][sub] = { [paperType]: m.value };
+        cell = { [paperType]: m.value };
+        data[sid][sub] = cell;
+      }
+      // Object shape supports theory + practical; `value` kept for older clients.
+      if (paperType === "Theory") {
+        cell.value = m.value;
+        cell.theory = m.value;
+      } else if (paperType === "Practical") {
+        cell.practical = m.value;
+        cell.practicalValue = m.value;
+      }
+      if (m.practicalValue != null && String(m.practicalValue).trim() !== "") {
+        cell.practical = m.practicalValue;
+        cell.practicalValue = m.practicalValue;
+        if (cell.Practical == null || cell.Practical === "") {
+          cell.Practical = m.practicalValue;
+        }
       }
     }
     res.json({ success: true, data });
@@ -713,6 +732,17 @@ export const upsertExamMarks = async (req, res, next) => {
     }
 
     const subjectRules = getExamSubjectMap(exam);
+    // Enrich rules with hasPractical from exam subjects
+    for (const s of exam.subjects || []) {
+      const key = String(s.subjectId?._id ?? s.subjectId);
+      const existing = subjectRules.get(key) || {};
+      subjectRules.set(key, {
+        ...existing,
+        maxMarks: s.maxMarks,
+        hasPractical: Boolean(s.hasPractical),
+      });
+    }
+
     const studentIds = Object.keys(marks);
     if (!studentIds.length) return res.status(400).json({ success: false, message: "No marks provided" });
 
@@ -736,10 +766,50 @@ export const upsertExamMarks = async (req, res, next) => {
         }
         const rule = subjectRules.get(String(subjectId));
         const cell = subjectMap[subjectId];
-        const paperValues =
-          cell && typeof cell === "object" && !Array.isArray(cell)
-            ? cell
-            : { Theory: cell };
+        const isObjectCell =
+          cell && typeof cell === "object" && !Array.isArray(cell);
+        const hasUpstreamPaperKey =
+          isObjectCell &&
+          ["Theory", "Practical", "Oral", "Grade", "grade", "oral"].some(
+            (key) => cell[key] !== undefined,
+          );
+        let paperValues;
+        if (isObjectCell) {
+          const aliasTheory = cell.theory ?? cell.value ?? cell.marks;
+          const aliasPractical =
+            cell.practical ?? cell.practicalValue ?? cell.practicalMarks;
+          paperValues = {};
+          if (cell.Theory !== undefined) paperValues.Theory = cell.Theory;
+          else if (aliasTheory !== undefined) paperValues.Theory = aliasTheory;
+          if (cell.Practical !== undefined) paperValues.Practical = cell.Practical;
+          else if (
+            aliasPractical !== undefined &&
+            aliasPractical !== null &&
+            String(aliasPractical).trim() !== ""
+          ) {
+            paperValues.Practical = aliasPractical;
+          }
+          if (cell.Oral !== undefined) paperValues.Oral = cell.Oral;
+          else if (cell.oral !== undefined) paperValues.Oral = cell.oral;
+          if (cell.Grade !== undefined) paperValues.Grade = cell.Grade;
+          else if (cell.grade !== undefined) paperValues.Grade = cell.grade;
+        } else {
+          paperValues = { Theory: cell };
+        }
+
+        if (!hasUpstreamPaperKey) {
+          const legacyTheory = paperValues.Theory;
+          if (
+            legacyTheory === undefined ||
+            legacyTheory === null ||
+            String(legacyTheory).trim() === ""
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: `Marks value is required for subject ${subjectId}`,
+            });
+          }
+        }
 
         for (const [rawType, rawVal] of Object.entries(paperValues)) {
           const isGradeKey = String(rawType).trim().toLowerCase() === "grade";
@@ -870,6 +940,49 @@ export const mobileGetExamMarks = async (req, res, next) => {
     }
 
     return getExamMarks(req, res, next);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Mobile marks save — accepts either nested map or array:
+ * [{ studentId, marks, practicalMarks, subjectId? }]
+ */
+export const mobileUpsertExamMarks = async (req, res, next) => {
+  try {
+    const role = req.user?.roleId?.name;
+    if (!["Teacher", "Staff"].includes(role)) {
+      return res.status(403).json({ success: false, message: "Not allowed" });
+    }
+
+    const schoolId = resolveSchoolId(req);
+    const exam = await Exam.findOne({ _id: req.params.examId, schoolId });
+    if (!exam) {
+      return res.status(404).json({ success: false, message: "Exam not found" });
+    }
+
+    const bodyMarks = req.body?.marks;
+    if (Array.isArray(bodyMarks)) {
+      const defaultSubjectId = String(
+        exam.subjects?.[0]?.subjectId?._id ?? exam.subjects?.[0]?.subjectId ?? "",
+      );
+      const nested = {};
+      for (const row of bodyMarks) {
+        const studentId = String(row.studentId || row.id || "");
+        if (!studentId) continue;
+        const subjectId = String(row.subjectId || defaultSubjectId);
+        if (!subjectId) continue;
+        if (!nested[studentId]) nested[studentId] = {};
+        nested[studentId][subjectId] = {
+          theory: row.marks ?? row.theory ?? row.value,
+          practical: row.practicalMarks ?? row.practical ?? row.practicalValue,
+        };
+      }
+      req.body = { ...req.body, marks: nested };
+    }
+
+    return upsertExamMarks(req, res, next);
   } catch (error) {
     next(error);
   }

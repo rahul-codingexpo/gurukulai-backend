@@ -2,6 +2,7 @@ import Student from "../student/student.model.js";
 import Staff from "../staff/staff.model.js";
 import StudentLeave from "../leaves/studentLeave.model.js";
 import StaffLeave from "../leaves/staffLeave.model.js";
+import { isValidObjectId } from "../../utils/isValidObjectId.util.js";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 const isApprover = (role) => ["Admin", "Principal", "Teacher"].includes(role);
@@ -289,6 +290,13 @@ export const approveRejectLeaveMobile = async (req, res, next) => {
     }
     const schoolId = req.user?.schoolId?._id ?? req.user?.schoolId;
     if (!schoolId) return res.status(400).json({ success: false, message: "School context missing" });
+
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid leave id",
+      });
+    }
 
     const { type = "student", status } = req.body || {};
     if (!["Approved", "Unapproved", "Rejected"].includes(status)) {

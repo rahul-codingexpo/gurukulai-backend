@@ -1,5 +1,6 @@
 import StaffLeave from "./staffLeave.model.js";
 import Staff from "../staff/staff.model.js";
+import { isValidObjectId } from "../../utils/isValidObjectId.util.js";
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -279,6 +280,13 @@ export const updateStaffLeaveStatus = async (req, res, next) => {
           req.user?.roleId?.name === "SuperAdmin"
             ? "schoolId is required (query or body)"
             : "School context missing",
+      });
+    }
+
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid leave id",
       });
     }
 

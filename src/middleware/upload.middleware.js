@@ -156,5 +156,14 @@ export const uploadTransportPhoto = createSpacesUpload({
   limits: { fileSize: TEN_MB },
 });
 
+// Student self-service profile photo (mobile)
+const FIVE_MB = 5 * 1024 * 1024;
+
+export const uploadStudentProfilePhoto = createSpacesUpload({
+  folder: "uploads/students/profile",
+  fileFilter,
+  limits: { fileSize: FIVE_MB, files: 1 },
+});
+
 export default upload;
 

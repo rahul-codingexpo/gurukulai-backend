@@ -26,6 +26,15 @@ export const errorHandler = (err, req, res, next) => {
   } else if (err.code === "LIMIT_UNEXPECTED_FILE") {
     statusCode = 400;
     message = "Unexpected file field in upload";
+  } else if (err.name === "CastError") {
+    // Invalid Mongo ObjectId / path cast — client error, not a server fault.
+    statusCode = 400;
+    message = err.path
+      ? `Invalid ${err.path}`
+      : "Invalid identifier";
+  } else if (err.name === "ValidationError") {
+    statusCode = 400;
+    message = err.message || "Validation failed";
   }
 
   res.status(statusCode).json({

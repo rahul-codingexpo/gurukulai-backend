@@ -28,6 +28,13 @@ const staffSchema = new mongoose.Schema(
       maxlength: 80,
     },
 
+    /** Free-text title when designation is "Other". */
+    customDesignation: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     joiningDate: {
       type: Date,
     },
