@@ -3,12 +3,22 @@ import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
 import { createSpacesUpload } from "../../middleware/spacesUpload.middleware.js";
 import {
+  injectSchool,
+  injectBranchSchoolScope,
+} from "../../middleware/injectSchool.middleware.js";
+import {
   getMyWallet,
   uploadWalletPayment,
   getMyWalletPayments,
+  getStudentAdvanceBalance,
+  creditStudentAdvance,
+  applyStudentAdvance,
 } from "./wallet.controller.js";
 
 const router = express.Router();
+
+const STAFF_WALLET_ROLES = ["Admin", "Principal", "Accountant"];
+const staffScope = [protect, injectSchool, injectBranchSchoolScope];
 
 const fileFilter = (req, file, cb) => {
   const allowed = ["image/png", "image/jpg", "image/jpeg", "image/webp"];
@@ -40,6 +50,26 @@ router.get(
   protect,
   authorize("Student", "Parent"),
   getMyWalletPayments
+);
+
+// Staff: student advance balance (overpayment credit)
+router.get(
+  "/students/:studentId/advance",
+  ...staffScope,
+  authorize(...STAFF_WALLET_ROLES, "Teacher"),
+  getStudentAdvanceBalance
+);
+router.post(
+  "/students/:studentId/advance",
+  ...staffScope,
+  authorize(...STAFF_WALLET_ROLES),
+  creditStudentAdvance
+);
+router.post(
+  "/students/:studentId/advance/use",
+  ...staffScope,
+  authorize(...STAFF_WALLET_ROLES),
+  applyStudentAdvance
 );
 
 export default router;

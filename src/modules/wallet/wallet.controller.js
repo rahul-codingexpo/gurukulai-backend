@@ -4,6 +4,12 @@ import Student from "../student/student.model.js";
 import School from "../school/school.model.js";
 import FeeInvoice from "../accounting/feeInvoice.model.js";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
+import { isSchoolInScope } from "../../utils/branchScope.util.js";
+import {
+  getStudentAdvance,
+  addStudentAdvance,
+  useStudentAdvance,
+} from "./walletAdvance.util.js";
 
 const resolveStudentForSelf = async (req) => {
   const roleName = req.user?.roleId?.name;
@@ -192,6 +198,104 @@ export const getMyWalletPayments = async (req, res, next) => {
           total,
           totalPages: Math.ceil(total / limitNo),
         },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const resolveStudentForStaff = async (req, studentId) => {
+  if (!studentId) return null;
+  const student = await Student.findById(studentId).select("_id schoolId name");
+  if (!student) return null;
+  if (req.schoolId && !isSchoolInScope(req, student.schoolId)) {
+    return null;
+  }
+  return student;
+};
+
+/** GET /api/wallet/students/:studentId/advance */
+export const getStudentAdvanceBalance = async (req, res, next) => {
+  try {
+    const student = await resolveStudentForStaff(req, req.params.studentId);
+    if (!student) {
+      return res.status(404).json({ success: false, message: "Student not found" });
+    }
+    const advanceBalance = await getStudentAdvance(student.schoolId, student._id);
+    res.json({
+      success: true,
+      data: {
+        studentId: student._id,
+        schoolId: student.schoolId,
+        advanceBalance,
+        credit: advanceBalance,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** POST /api/wallet/students/:studentId/advance  body: { amount } */
+export const creditStudentAdvance = async (req, res, next) => {
+  try {
+    const student = await resolveStudentForStaff(req, req.params.studentId);
+    if (!student) {
+      return res.status(404).json({ success: false, message: "Student not found" });
+    }
+    const amount = parseNumber(req.body?.amount);
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "amount must be greater than 0",
+      });
+    }
+    const advanceBalance = await addStudentAdvance(
+      student.schoolId,
+      student._id,
+      amount,
+    );
+    res.json({
+      success: true,
+      data: {
+        studentId: student._id,
+        schoolId: student.schoolId,
+        added: Math.round(amount * 100) / 100,
+        advanceBalance,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** POST /api/wallet/students/:studentId/advance/use  body: { amount } */
+export const applyStudentAdvance = async (req, res, next) => {
+  try {
+    const student = await resolveStudentForStaff(req, req.params.studentId);
+    if (!student) {
+      return res.status(404).json({ success: false, message: "Student not found" });
+    }
+    const amount = parseNumber(req.body?.amount);
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "amount must be greater than 0",
+      });
+    }
+    const { used, remaining } = await useStudentAdvance(
+      student.schoolId,
+      student._id,
+      amount,
+    );
+    res.json({
+      success: true,
+      data: {
+        studentId: student._id,
+        schoolId: student.schoolId,
+        used,
+        advanceBalance: remaining,
       },
     });
   } catch (error) {
