@@ -22,6 +22,81 @@ const TRACKED_INVOICE_FIELDS = [
   "remarks",
 ];
 
+const INVOICE_MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const parseInvoiceMonths = (period) =>
+  String(period || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((m) => INVOICE_MONTHS.includes(m));
+
+/** Academic year April–March containing `fromDate`. */
+const getAcademicYearRange = (fromDate = new Date()) => {
+  const d = new Date(fromDate);
+  const y = d.getFullYear();
+  const m = d.getMonth(); // 0–11
+  const startYear = m < 3 ? y - 1 : y;
+  return {
+    start: new Date(startYear, 3, 1, 0, 0, 0, 0),
+    end: new Date(startYear + 1, 2, 31, 23, 59, 59, 999),
+  };
+};
+
+const monthsOverlap = (monthsA, monthsB) => {
+  const setB = new Set(monthsB || []);
+  return (monthsA || []).filter((m) => setB.has(m));
+};
+
+/**
+ * Find non-cancelled invoice for same student+feeType in current academic year
+ * whose period months overlap the requested period.
+ */
+const findOverlappingPeriodInvoice = async ({
+  schoolId,
+  studentId,
+  feeTypeId,
+  periodStr,
+  asOfDate,
+}) => {
+  const requestedMonths = parseInvoiceMonths(periodStr);
+  const ay = getAcademicYearRange(asOfDate || new Date());
+  const existingList = await FeeInvoice.find({
+    schoolId,
+    studentId,
+    feeTypeId,
+    status: { $ne: "Cancelled" },
+    createdAt: { $gte: ay.start, $lte: ay.end },
+  })
+    .select("period invoiceNumber createdAt")
+    .lean();
+
+  for (const inv of existingList) {
+    const existingMonths = parseInvoiceMonths(inv.period);
+    if (requestedMonths.length && existingMonths.length) {
+      const overlap = monthsOverlap(requestedMonths, existingMonths);
+      if (overlap.length) {
+        return { invoice: inv, overlap };
+      }
+    } else if (periodStr && String(inv.period || "").trim() === periodStr) {
+      return { invoice: inv, overlap: requestedMonths.length ? requestedMonths : [periodStr] };
+    }
+  }
+  return null;
+};
+
 const populateInvoice = (q) =>
   q
     .populate("studentId", "name admissionNumber className section rollNumber phone parents")
@@ -236,17 +311,19 @@ export const createInvoice = async (req, res, next) => {
     }
 
     const periodStr = period ? String(period).trim() : "";
-    const existing = await FeeInvoice.findOne({
+    const asOfDate = dueDate ? new Date(dueDate) : new Date();
+    const overlapHit = await findOverlappingPeriodInvoice({
       schoolId: campusSchoolId,
       studentId,
       feeTypeId,
-      period: periodStr,
-      status: { $ne: "Cancelled" },
+      periodStr,
+      asOfDate,
     });
-    if (existing) {
+    if (overlapHit) {
+      const monthsLabel = (overlapHit.overlap || []).join(", ") || periodStr || "this period";
       return res.status(409).json({
         success: false,
-        message: "Invoice already exists for this student, fee type and period",
+        message: `Invoice already exists for ${monthsLabel} (${overlapHit.invoice.invoiceNumber || "existing"}). Cannot create again for the same month(s) in this academic year.`,
       });
     }
     const allowedStatuses = ["Paid", "Pending", "Overdue", "Partial"];
@@ -390,18 +467,19 @@ export const createBulkInvoices = async (req, res, next) => {
       status: "ACTIVE",
     }).select("_id");
     const periodStr = period ? String(period).trim() : "";
+    const asOfDate = dueDate ? new Date(dueDate) : new Date();
     let created = 0;
     let skipped = 0;
     const invoices = [];
     for (const s of students) {
-      const exists = await FeeInvoice.findOne({
+      const overlapHit = await findOverlappingPeriodInvoice({
         schoolId: req.schoolId,
         studentId: s._id,
         feeTypeId,
-        period: periodStr,
-        status: { $ne: "Cancelled" },
+        periodStr,
+        asOfDate,
       });
-      if (exists) {
+      if (overlapHit) {
         skipped++;
         continue;
       }
