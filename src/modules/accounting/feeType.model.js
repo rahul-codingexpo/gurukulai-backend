@@ -31,6 +31,14 @@ const feeTypeSchema = new mongoose.Schema(
       required: true,
       enum: ["Monthly", "Quarterly", "Half-Yearly", "Yearly", "One-Time"],
     },
+    /**
+     * Compulsory fees auto-apply on invoice create every cycle.
+     * Optional fees (exam/uniform/etc.) are chosen manually for a given month.
+     */
+    isCompulsory: {
+      type: Boolean,
+      default: true,
+    },
     description: { type: String, trim: true, default: "" },
     icon: {
       type: String,

@@ -109,7 +109,7 @@ export const getBranchCampuses = async (req, res, next) => {
     const filter = home?.branchId ? { branchId: home.branchId } : { _id: homeId };
 
     const campuses = await School.find(filter)
-      .select("name schoolCode address city state pincode status branchId upiId qrCode logo website affiliation registrationNumber yearEstablished feeReceiptSettings idCardSettings marksheetSettings")
+      .select("name schoolCode address city state pincode status branchId upiId qrCode logo website affiliation registrationNumber yearEstablished feeReceiptSettings idCardSettings marksheetSettings attendanceSettings")
       .populate("branchId", "name")
       .sort({ name: 1 })
       .lean();
@@ -150,6 +150,21 @@ export const updateSchool = async (req, res, next) => {
     }
 
     const update = { ...(req.body || {}) };
+
+    // Only SuperAdmin may enable/disable a school.
+    if (roleName !== "SuperAdmin" && update.status !== undefined) {
+      delete update.status;
+    }
+    if (update.status !== undefined) {
+      const nextStatus = String(update.status || "").toUpperCase();
+      if (nextStatus !== "ACTIVE" && nextStatus !== "INACTIVE") {
+        return res.status(400).json({
+          success: false,
+          message: "status must be ACTIVE or INACTIVE",
+        });
+      }
+      update.status = nextStatus;
+    }
 
     // Canonicalize UPI id (accept aliases)
     const canonicalUpiId = update.upiId ?? update.paymentUpiId;
@@ -287,6 +302,53 @@ export const updateSchool = async (req, res, next) => {
         ...existing,
         ...parsedMarksheetSettings,
       };
+    }
+
+    // Staff attendance time / grace settings
+    let parsedAttendanceSettings = null;
+    if (update.attendanceSettings && typeof update.attendanceSettings === "string") {
+      try {
+        parsedAttendanceSettings = JSON.parse(update.attendanceSettings);
+      } catch (_) {}
+    } else if (update.attendanceSettings && typeof update.attendanceSettings === "object") {
+      parsedAttendanceSettings = update.attendanceSettings;
+    } else if (update.attendanceSettingsJson) {
+      try {
+        parsedAttendanceSettings = JSON.parse(update.attendanceSettingsJson);
+      } catch (_) {}
+      delete update.attendanceSettingsJson;
+    }
+    if (parsedAttendanceSettings) {
+      const existing =
+        schoolDoc.attendanceSettings?.toObject?.() ||
+        schoolDoc.attendanceSettings ||
+        {};
+      const next = {
+        ...existing,
+        ...parsedAttendanceSettings,
+      };
+      if (next.staffStartTime != null) {
+        const raw = String(next.staffStartTime).trim();
+        if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(raw)) {
+          return res.status(400).json({
+            success: false,
+            message: "staffStartTime must be HH:mm (e.g. 08:00)",
+          });
+        }
+        const [hh, mm] = raw.split(":");
+        next.staffStartTime = `${String(hh).padStart(2, "0")}:${mm}`;
+      }
+      if (next.staffGraceMinutes != null) {
+        const g = Number(next.staffGraceMinutes);
+        if (!Number.isFinite(g) || g < 0 || g > 180) {
+          return res.status(400).json({
+            success: false,
+            message: "staffGraceMinutes must be between 0 and 180",
+          });
+        }
+        next.staffGraceMinutes = Math.round(g);
+      }
+      update.attendanceSettings = next;
     }
 
     const school = await School.findByIdAndUpdate(req.params.id, update, {

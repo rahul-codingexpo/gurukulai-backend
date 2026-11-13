@@ -1,6 +1,7 @@
 import User from "../user/user.model.js";
 import Student from "../student/student.model.js";
 import Staff from "../staff/staff.model.js";
+import School from "../school/school.model.js";
 import { comparePassword } from "../../utils/hash.js";
 import { generateToken } from "../../utils/jwt.js";
 import crypto from "crypto";
@@ -224,6 +225,21 @@ export const loginService = async (body = {}) => {
     const err = new Error("Invalid password");
     err.statusCode = 401;
     throw err;
+  }
+
+  // Block login for users belonging to a disabled school (web + mobile).
+  // SuperAdmin accounts are not tied to a school and remain allowed.
+  const roleName = user?.roleId?.name;
+  const schoolRef = user?.schoolId?._id || user?.schoolId;
+  if (roleName !== "SuperAdmin" && schoolRef) {
+    const school = await School.findById(schoolRef).select("status name");
+    if (!school || String(school.status || "").toUpperCase() === "INACTIVE") {
+      const err = new Error(
+        "This school is disabled. Please contact support.",
+      );
+      err.statusCode = 403;
+      throw err;
+    }
   }
 
   const token = generateToken(user);

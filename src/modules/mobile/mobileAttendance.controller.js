@@ -1,5 +1,6 @@
 import Student from "../student/student.model.js";
 import Staff from "../staff/staff.model.js";
+import School from "../school/school.model.js";
 import StudentAttendance from "../attendance/studentAttendance.model.js";
 import StaffAttendance from "../attendance/staffAttendance.model.js";
 import mongoose from "mongoose";
@@ -8,6 +9,11 @@ import {
   dateOnlyRange,
   attendanceStudentIdKey,
 } from "../../utils/dateOnly.util.js";
+import {
+  buildStaffAttendancePayload,
+  resolveAttendanceSettings,
+  resolveStaffMarkTypeFromEntry,
+} from "../attendance/staffAttendancePolicy.js";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 
@@ -510,14 +516,18 @@ export const teacherMarkSelfAttendance = async (req, res, next) => {
       });
     }
 
-    const persistedStatus = selectedStatus === "Absent" ? "Absent" : "Present";
-    const computedEntryTime =
-      entryTime !== undefined
-        ? entryTime
-        : selectedStatus === "Present" || selectedStatus === "Late"
-          ? hhmmNow()
-          : "";
-    const computedExitTime = exitTime !== undefined ? exitTime : "";
+    const school = await School.findById(staff.schoolId)
+      .select("attendanceSettings")
+      .lean();
+    const attendanceSettings = resolveAttendanceSettings(school);
+    const payload = buildStaffAttendancePayload({
+      status: selectedStatus,
+      markType: selectedStatus,
+      entryTime,
+      exitTime,
+      attendanceSettings,
+      nowHhmm: hhmmNow(),
+    });
 
     const record = await StaffAttendance.findOneAndUpdate(
       { schoolId: staff.schoolId, date: dateOnly, staffId: staff._id },
@@ -525,10 +535,7 @@ export const teacherMarkSelfAttendance = async (req, res, next) => {
         schoolId: staff.schoolId,
         date: dateOnly,
         staffId: staff._id,
-        status: persistedStatus,
-        markType: selectedStatus,
-        entryTime: computedEntryTime || "",
-        exitTime: computedExitTime || "",
+        ...payload,
       },
       { upsert: true, new: true }
     ).lean();
@@ -543,6 +550,7 @@ export const teacherMarkSelfAttendance = async (req, res, next) => {
         markType: record.markType || record.status,
         checkIn: record.entryTime || null,
         checkOut: record.exitTime || null,
+        attendanceSettings,
       },
     });
   } catch (error) {
@@ -589,6 +597,10 @@ export const getTeacherSelfAttendanceMonth = async (req, res, next) => {
     }
 
     const { start, end } = startEndOfMonth(year, month);
+    const school = await School.findById(staff.schoolId)
+      .select("attendanceSettings")
+      .lean();
+    const attendanceSettings = resolveAttendanceSettings(school);
     const records = await StaffAttendance.find({
       schoolId: staff.schoolId,
       staffId: staff._id,
@@ -599,7 +611,12 @@ export const getTeacherSelfAttendanceMonth = async (req, res, next) => {
       .lean();
 
     const normalized = records.map((r) => {
-      const markType = r.markType || r.status;
+      const markType = resolveStaffMarkTypeFromEntry({
+        entryTime: r.entryTime,
+        status: r.status,
+        markType: r.markType || r.status,
+        attendanceSettings,
+      });
       return {
         _id: r._id,
         date: r.date,

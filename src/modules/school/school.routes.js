@@ -2,6 +2,7 @@ import express from "express";
 import { createSchool, getSchools, getBranchCampuses, updateSchool, deleteSchool } from "./school.controller.js";
 import { onboardSchool } from "./school.onboard.controller.js";
 import { branchOnboard } from "./school.branchOnboard.controller.js";
+import { appendBranchCampus } from "./school.appendCampus.controller.js";
 import { protect } from "../../middleware/auth.middleware.js";
 import { authorize } from "../../middleware/role.middleware.js";
 import upload from "../../middleware/upload.middleware.js";
@@ -32,6 +33,18 @@ router.post(
   authorize("SuperAdmin"),
   upload.any(),
   branchOnboard,
+);
+
+/**
+ * Admin / Principal / SuperAdmin: append a campus to the caller's branch
+ * Multipart: schools (JSON string), optional logo_0, optional branchName / homeSchoolId
+ */
+router.post(
+  "/branch-campuses",
+  protect,
+  authorize("Admin", "Principal", "SuperAdmin"),
+  upload.any(),
+  appendBranchCampus,
 );
 
 /**

@@ -190,6 +190,23 @@ const schoolSchema = new mongoose.Schema(
         default: "#FFFFFF",
         trim: true,
       },
+      // School defaults for Exam Setup seeding + letter grades.
+      defaultMaxMarks: { type: Number, default: 100, min: 1 },
+      defaultPassMarks: { type: Number, default: 35, min: 0 },
+      defaultPracticalMaxMarks: { type: Number, default: 50, min: 1 },
+      defaultPracticalPassMarks: { type: Number, default: 18, min: 0 },
+      gradingScale: [
+        {
+          minPercent: { type: Number, min: 0, max: 100 },
+          grade: { type: String, trim: true },
+        },
+      ],
+    },
+
+    // Staff attendance policy: start time + grace → Present / Late.
+    attendanceSettings: {
+      staffStartTime: { type: String, default: "08:00", trim: true }, // HH:mm
+      staffGraceMinutes: { type: Number, default: 5, min: 0, max: 180 },
     },
 
     // Per-school timetable view template (Option D — Hybrid).

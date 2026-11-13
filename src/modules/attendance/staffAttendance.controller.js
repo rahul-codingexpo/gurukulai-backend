@@ -1,5 +1,16 @@
 import StaffAttendance from "./staffAttendance.model.js";
 import Staff from "../staff/staff.model.js";
+import School from "../school/school.model.js";
+import {
+  buildStaffAttendancePayload,
+  resolveStaffMarkTypeFromEntry,
+  resolveAttendanceSettings,
+} from "./staffAttendancePolicy.js";
+
+const hhmmNow = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -38,25 +49,36 @@ export const markStaffAttendance = async (req, res, next) => {
     const dateOnly = new Date(date);
     dateOnly.setHours(0, 0, 0, 0);
 
+    const school = await School.findById(schoolId).select("attendanceSettings").lean();
+    const attendanceSettings = resolveAttendanceSettings(school);
+
     if (entries && Array.isArray(entries)) {
-      const toUpsert = entries.map((e) => ({
-        updateOne: {
-          filter: {
-            schoolId,
-            date: dateOnly,
-            staffId: e.staffId,
+      const toUpsert = entries.map((e) => {
+        const payload = buildStaffAttendancePayload({
+          status: e.status,
+          markType: e.markType || e.status,
+          entryTime: e.entryTime,
+          exitTime: e.exitTime,
+          attendanceSettings,
+          nowHhmm: hhmmNow(),
+        });
+        return {
+          updateOne: {
+            filter: {
+              schoolId,
+              date: dateOnly,
+              staffId: e.staffId,
+            },
+            update: {
+              schoolId,
+              date: dateOnly,
+              staffId: e.staffId,
+              ...payload,
+            },
+            upsert: true,
           },
-          update: {
-            schoolId,
-            date: dateOnly,
-            staffId: e.staffId,
-            status: e.status === "Absent" ? "Absent" : "Present",
-            entryTime: e.entryTime || "",
-            exitTime: e.exitTime || "",
-          },
-          upsert: true,
-        },
-      }));
+        };
+      });
       await StaffAttendance.bulkWrite(toUpsert);
       const records = await StaffAttendance.find({
         schoolId,
@@ -73,9 +95,18 @@ export const markStaffAttendance = async (req, res, next) => {
     if (!staffId || !status) {
       return res.status(400).json({
         success: false,
-        message: "staffId and status (Present/Absent) are required",
+        message: "staffId and status (Present/Absent/Late) are required",
       });
     }
+
+    const payload = buildStaffAttendancePayload({
+      status,
+      markType: status,
+      entryTime,
+      exitTime,
+      attendanceSettings,
+      nowHhmm: hhmmNow(),
+    });
 
     const record = await StaffAttendance.findOneAndUpdate(
       { schoolId, date: dateOnly, staffId },
@@ -83,9 +114,7 @@ export const markStaffAttendance = async (req, res, next) => {
         schoolId,
         date: dateOnly,
         staffId,
-        status: status === "Absent" ? "Absent" : "Present",
-        entryTime: entryTime || "",
-        exitTime: exitTime || "",
+        ...payload,
       },
       { upsert: true, new: true }
     ).populate("staffId", "name designation");
@@ -169,25 +198,37 @@ export const getStaffAttendanceByDate = async (req, res, next) => {
       filter.date = { $gte: start, $lte: end };
     }
 
+    const school = await School.findById(schoolId).select("attendanceSettings").lean();
+    const attendanceSettings = resolveAttendanceSettings(school);
+
     const records = await StaffAttendance.find(filter)
       .populate("staffId", "name designation")
       .sort({ date: -1, "staffId.name": 1 });
 
-    const data = records.map((r) => ({
-      _id: r._id,
-      date: r.date,
-      staffId: r.staffId?._id,
-      name: r.staffId?.name,
-      role: r.staffId?.designation,
-      status: r.status,
-      markType: r.markType || r.status,
-      entryTime: r.entryTime,
-      exitTime: r.exitTime,
-    }));
+    const data = records.map((r) => {
+      const markType = resolveStaffMarkTypeFromEntry({
+        entryTime: r.entryTime,
+        status: r.status,
+        markType: r.markType || r.status,
+        attendanceSettings,
+      });
+      return {
+        _id: r._id,
+        date: r.date,
+        staffId: r.staffId?._id,
+        name: r.staffId?.name,
+        role: r.staffId?.designation,
+        status: r.status,
+        markType,
+        entryTime: r.entryTime,
+        exitTime: r.exitTime,
+      };
+    });
 
     res.json({
       success: true,
       data,
+      attendanceSettings,
     });
   } catch (error) {
     next(error);
@@ -219,10 +260,21 @@ export const updateStaffAttendance = async (req, res, next) => {
       });
     }
 
-    const { status, entryTime, exitTime } = req.body;
-    if (status !== undefined) record.status = status === "Absent" ? "Absent" : "Present";
-    if (entryTime !== undefined) record.entryTime = entryTime;
-    if (exitTime !== undefined) record.exitTime = exitTime;
+    const school = await School.findById(schoolId).select("attendanceSettings").lean();
+    const attendanceSettings = resolveAttendanceSettings(school);
+    const { status, entryTime, exitTime, markType } = req.body;
+    const payload = buildStaffAttendancePayload({
+      status: status !== undefined ? status : record.status,
+      markType: markType || status || record.markType || record.status,
+      entryTime: entryTime !== undefined ? entryTime : record.entryTime,
+      exitTime: exitTime !== undefined ? exitTime : record.exitTime,
+      attendanceSettings,
+      nowHhmm: hhmmNow(),
+    });
+    record.status = payload.status;
+    record.markType = payload.markType;
+    record.entryTime = payload.entryTime;
+    record.exitTime = payload.exitTime;
     await record.save();
 
     const data = {
