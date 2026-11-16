@@ -293,7 +293,7 @@ export const createInvoice = async (req, res, next) => {
     const student = await Student.findOne({
       _id: studentId,
       ...schoolIdFilter(req),
-    }).select("_id schoolId");
+    }).select("_id schoolId feeStructure");
     if (!student) {
       return res.status(404).json({ success: false, message: "Student not found" });
     }
@@ -302,12 +302,44 @@ export const createInvoice = async (req, res, next) => {
     const feeType = await FeeType.findOne({
       _id: feeTypeId,
       schoolId: campusSchoolId,
-    }).select("_id");
+    }).select("_id period");
     if (!feeType) {
       return res.status(404).json({
         success: false,
         message: "Fee type not found for the student's campus",
       });
+    }
+
+    const structureRow = (Array.isArray(student.feeStructure) ? student.feeStructure : []).find(
+      (row) => String(row?.feeType || "") === String(feeTypeId),
+    );
+    let isOneTimeFee = false;
+    if (structureRow) {
+      const mode = String(structureRow.billingMode || "").trim();
+      if (mode === "oneTime") isOneTimeFee = true;
+      else if (mode === "perMonth") isOneTimeFee = false;
+      else {
+        isOneTimeFee =
+          String(structureRow.period || "").trim().toLowerCase() === "one-time";
+      }
+    } else {
+      isOneTimeFee = String(feeType.period || "").trim().toLowerCase() === "one-time";
+    }
+    if (isOneTimeFee) {
+      const existingOneTime = await FeeInvoice.findOne({
+        schoolId: campusSchoolId,
+        studentId,
+        feeTypeId,
+        status: { $ne: "Cancelled" },
+      })
+        .select("_id invoiceNumber")
+        .lean();
+      if (existingOneTime) {
+        return res.status(409).json({
+          success: false,
+          message: `One-time fee already invoiced (${existingOneTime.invoiceNumber || "existing"}). Cannot create again.`,
+        });
+      }
     }
 
     const periodStr = period ? String(period).trim() : "";
