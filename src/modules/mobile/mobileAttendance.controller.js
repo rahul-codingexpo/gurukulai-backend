@@ -10,6 +10,10 @@ import {
   attendanceStudentIdKey,
 } from "../../utils/dateOnly.util.js";
 import {
+  hhmmNowInSchoolTz,
+  todayYmdInSchoolTz,
+} from "../../utils/schoolTz.util.js";
+import {
   buildStaffAttendancePayload,
   resolveAttendanceSettings,
   resolveStaffMarkTypeFromEntry,
@@ -54,12 +58,11 @@ const pct = (present, total) => {
 
 const toDateOnly = (input) => parseDateOnlyLocal(input);
 
-const hhmmNow = () => {
-  const d = new Date();
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  return `${h}:${m}`;
-};
+/** School wall-clock "HH:mm" (SCHOOL_TIMEZONE), not process local TZ. */
+const hhmmNow = () => hhmmNowInSchoolTz();
+
+/** Default calendar day for mobile mark when client omits date. */
+const defaultAttendanceDateOnly = () => toDateOnly(todayYmdInSchoolTz());
 
 const daysInMonth = (year, month) => new Date(year, month, 0).getDate();
 const monthShort = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
@@ -223,7 +226,7 @@ export const getTeacherStudentsForMarking = async (req, res, next) => {
     if (!className) {
       return res.status(400).json({ success: false, message: "className is required" });
     }
-    const selectedDate = toDateOnly(date || new Date());
+    const selectedDate = toDateOnly(date || todayYmdInSchoolTz());
     if (!selectedDate) {
       return res.status(400).json({ success: false, message: "Invalid date" });
     }
@@ -508,7 +511,7 @@ export const teacherMarkSelfAttendance = async (req, res, next) => {
       });
     }
 
-    const dateOnly = toDateOnly(date || new Date());
+    const dateOnly = toDateOnly(date || todayYmdInSchoolTz()) || defaultAttendanceDateOnly();
     if (!dateOnly) {
       return res.status(400).json({
         success: false,
