@@ -6,9 +6,6 @@ const roleNameOf = (req) => req.user?.roleId?.name;
 const resolveSchoolId = (req) =>
   req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
 
-const DEFAULT_HOLIDAY_IMAGE =
-  "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3d6.png";
-
 const toDateOnlyString = (value) => {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
@@ -20,7 +17,7 @@ const toDateOnlyString = (value) => {
 
 const expandEventDays = (event, year, month) => {
   const title = event.title || "Holiday";
-  const image = event.imageUrl || DEFAULT_HOLIDAY_IMAGE;
+  const image = event.imageUrl ? String(event.imageUrl) : "";
   const description = event.description || "";
   const location = event.location || "";
   const start = new Date(event.startAt);

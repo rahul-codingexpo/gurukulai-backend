@@ -517,6 +517,7 @@ export const applyStaffLeaveMobile = async (req, res, next) => {
 
     const leave = out.payload.data;
     const durationDays = daysBetweenInclusive(leave.leaveFrom, leave.leaveTo);
+    const status = leave.status || "Unapproved";
     return res.status(201).json({
       success: true,
       message: "Leave application submitted successfully",
@@ -524,7 +525,8 @@ export const applyStaffLeaveMobile = async (req, res, next) => {
         _id: leave._id,
         leaveType: leave.leaveCategory || leaveType,
         durationDays,
-        status: "Pending Approval",
+        status,
+        statusLabel: status === "Unapproved" ? "Pending" : status,
         leaveFrom: leave.leaveFrom,
         leaveTo: leave.leaveTo,
       },

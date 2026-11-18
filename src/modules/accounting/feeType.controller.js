@@ -45,7 +45,8 @@ const populateFeeType = (q) =>
 export const createFeeType = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const { name, code, amount, period, description, icon, classIds } = req.body || {};
+    const { name, code, amount, period, description, icon, classIds, isCompulsory } =
+      req.body || {};
     if (!name || !code || amount == null || !period) {
       return res.status(400).json({
         success: false,
@@ -92,6 +93,7 @@ export const createFeeType = async (req, res, next) => {
       code: String(code).trim().toUpperCase(),
       amount: Number(amount),
       period,
+      isCompulsory: isCompulsory === false || isCompulsory === "false" ? false : true,
       description: description ? String(description).trim() : "",
       icon: icon ? String(icon).trim() : "",
       classIds: normalizedClassIds,
@@ -181,7 +183,8 @@ export const getFeeTypeById = async (req, res, next) => {
 export const updateFeeType = async (req, res, next) => {
   try {
     if (!requireSchool(req, res)) return;
-    const { name, code, amount, period, description, icon, status, classIds } = req.body || {};
+    const { name, code, amount, period, description, icon, status, classIds, isCompulsory } =
+      req.body || {};
     const feeType = await FeeType.findOne({
       _id: req.params.id,
       ...schoolIdFilter(req),
@@ -202,6 +205,10 @@ export const updateFeeType = async (req, res, next) => {
       feeType.amount = amountNum;
     }
     if (period !== undefined) feeType.period = period;
+    if (isCompulsory !== undefined) {
+      feeType.isCompulsory =
+        isCompulsory === false || isCompulsory === "false" ? false : true;
+    }
     if (description !== undefined) feeType.description = String(description).trim();
     if (icon !== undefined) feeType.icon = String(icon).trim();
     if (status !== undefined) feeType.status = status;

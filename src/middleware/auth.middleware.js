@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../modules/user/user.model.js";
+import School from "../modules/school/school.model.js";
 
 export const protect = async (req, res, next) => {
   try {
@@ -33,6 +34,19 @@ export const protect = async (req, res, next) => {
         success: false,
         message: "User not found",
       });
+    }
+
+    // Reject sessions for users whose school was disabled after login.
+    const roleName = user?.roleId?.name;
+    const schoolRef = user?.schoolId?._id || user?.schoolId;
+    if (roleName !== "SuperAdmin" && schoolRef) {
+      const school = await School.findById(schoolRef).select("status");
+      if (!school || String(school.status || "").toUpperCase() === "INACTIVE") {
+        return res.status(403).json({
+          success: false,
+          message: "This school is disabled. Please contact support.",
+        });
+      }
     }
 
     req.user = user;

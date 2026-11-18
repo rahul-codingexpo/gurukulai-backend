@@ -123,6 +123,15 @@ const studentSchema = new mongoose.Schema(
         feeType: String,
         period: String,
         amount: Number,
+        /**
+         * Per-student cadence (separate from FeeType.isCompulsory).
+         * oneTime = bill once; perMonth = bill each invoice cycle.
+         */
+        billingMode: {
+          type: String,
+          enum: ["oneTime", "perMonth"],
+          default: "perMonth",
+        },
       },
     ],
 
