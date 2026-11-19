@@ -1469,6 +1469,10 @@ export const createInvoiceFromPastFee = async (req, res, next) => {
         changed = true;
       }
     }
+    if (body.isFamilyInvoice !== undefined) {
+      invoice.isFamilyInvoice = Boolean(body.isFamilyInvoice);
+      changed = true;
+    }
     if (changed) await invoice.save();
 
     const invPopulated = await FeeInvoice.findById(invoice._id)

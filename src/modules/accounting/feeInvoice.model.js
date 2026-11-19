@@ -93,6 +93,12 @@ const feeInvoiceSchema = new mongoose.Schema(
       default: undefined,
     },
 
+    /**
+     * True when created via By-father (family) invoice create.
+     * Family invoices list only these; student invoices list excludes them.
+     */
+    isFamilyInvoice: { type: Boolean, default: false, index: true },
+
     /** True when this invoice was created from Past Fee Data (old dues). */
     isLegacyDue: { type: Boolean, default: false, index: true },
     pastFeeRecordId: {
