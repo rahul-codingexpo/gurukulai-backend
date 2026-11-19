@@ -251,6 +251,7 @@ export const createInvoice = async (req, res, next) => {
       status: requestedStatus,
       paidAmount,
       paid: paidFromBody,
+      isFamilyInvoice: isFamilyInvoiceBody,
     } = req.body || {};
     if (!studentId || !feeTypeId || amount == null || !dueDate) {
       return res.status(400).json({
@@ -436,6 +437,7 @@ export const createInvoice = async (req, res, next) => {
       dueDate: new Date(dueDate),
       period: periodStr,
       remarks: remarks ? String(remarks).trim() : "",
+      isFamilyInvoice: Boolean(isFamilyInvoiceBody),
     });
     const populated = await populateInvoice(FeeInvoice.findById(invoice._id));
     await writeFeeAudit({
