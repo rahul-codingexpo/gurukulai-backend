@@ -11,6 +11,20 @@ import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 
 const roleNameOf = (req) => req.user?.roleId?.name;
 
+/** Prefer ObjectId when classId/sectionId are populated documents. */
+const refId = (ref) => String(ref?._id ?? ref ?? "").trim();
+
+/** True when student may access this homework (empty section = all sections). */
+const studentMatchesHomework = (homework, classIds, sectionIds) => {
+  const classId = refId(homework.classId);
+  const sectionId = refId(homework.sectionId);
+  const okClass =
+    !classId || classIds.some((id) => String(id) === classId);
+  const okSection =
+    !sectionId || sectionIds.some((id) => String(id) === sectionId);
+  return okClass && okSection;
+};
+
 const parseBoolean = (v) => {
   if (v === true || v === "true" || v === "1" || v === 1) return true;
   if (v === false || v === "false" || v === "0" || v === 0) return false;
@@ -112,14 +126,32 @@ async function fileSizeBytes(storedPath) {
   }
 }
 
+/** Homework files are stored under uploads/study-materials via multer. */
+function normalizeHomeworkFilePath(storedPath) {
+  let value = String(storedPath || "").trim().replace(/\\/g, "/");
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith("uploads/")) value = `/${value}`;
+  // Bare multer filename → study-materials
+  if (!value.includes("/")) {
+    return `/uploads/study-materials/${value}`;
+  }
+  // Legacy /uploads/<file.ext> (missing study-materials folder)
+  const bareUnderUploads = value.match(/^\/uploads\/([^/]+)$/);
+  if (bareUnderUploads && bareUnderUploads[1].includes(".")) {
+    return `/uploads/study-materials/${bareUnderUploads[1]}`;
+  }
+  return value.startsWith("/") ? value : `/${value}`;
+}
+
 async function buildFileResource(storedPath, downloadable, withSize) {
-  const fileName = path.basename(storedPath);
-  const mimeType = inferMime(storedPath);
-  const sizeBytes = withSize ? await fileSizeBytes(storedPath) : null;
-  const ext = extFromStored(storedPath).replace(".", "");
-  const url = storedPath.startsWith("/") ? storedPath : `/${storedPath}`;
+  const url = normalizeHomeworkFilePath(storedPath);
+  const fileName = path.basename(url || storedPath);
+  const mimeType = inferMime(url || storedPath);
+  const sizeBytes = withSize ? await fileSizeBytes(url || storedPath) : null;
+  const ext = extFromStored(url || storedPath).replace(".", "");
   return {
-    id: storedPath,
+    id: url || storedPath,
     type: "file",
     url,
     fileName,
@@ -166,7 +198,9 @@ function buildStudentListItem(hw, submission, now = new Date()) {
   const submitted = !!submission;
   const status = studentHomeworkStatus(submitted, due, now);
   const subj = hw.subjectId;
-  const files = hw.files || [];
+  const files = (hw.files || [])
+    .map((p) => normalizeHomeworkFilePath(p))
+    .filter(Boolean);
   return {
     _id: hw._id,
     title: hw.title,
@@ -295,6 +329,9 @@ async function serializeStudentHomeworkDetail(hw, submission, now = new Date()) 
     };
   }
 
+  const files = (hw.files || [])
+    .map((p) => normalizeHomeworkFilePath(p))
+    .filter(Boolean);
   return {
     _id: hw._id,
     title: hw.title,
@@ -302,7 +339,7 @@ async function serializeStudentHomeworkDetail(hw, submission, now = new Date()) 
     date: hw.date,
     dueDate: hw.dueDate,
     url: hw.url,
-    files: hw.files || [],
+    files,
     downloadable: hw.downloadable,
     classId: hw.classId,
     sectionId: hw.sectionId,
@@ -318,7 +355,7 @@ async function serializeStudentHomeworkDetail(hw, submission, now = new Date()) 
     statusLabel: statusLabel(status),
     hasSubmission: submitted,
     isOverdue: status === "OVERDUE",
-    previewImageUrl: firstPreviewImage(hw.files || []),
+    previewImageUrl: firstPreviewImage(files),
     resourceCount: resources.length,
     resources,
     submission: submissionOut,
@@ -589,9 +626,7 @@ export const getMobileHomeworkById = async (req, res, next) => {
       }
 
       const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
-      const okClass = classIds.some((id) => String(id) === String(homework.classId));
-      const okSection = sectionIds.some((id) => String(id) === String(homework.sectionId));
-      if (!okClass || !okSection) {
+      if (!studentMatchesHomework(homework, classIds, sectionIds)) {
         return res.status(403).json({
           success: false,
           message: "Not allowed to view this homework",
@@ -1185,9 +1220,7 @@ export const getMyMobileHomeworkSubmission = async (req, res, next) => {
     }
 
     const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
-    const okClass = classIds.some((id) => String(id) === String(homework.classId));
-    const okSection = sectionIds.some((id) => String(id) === String(homework.sectionId));
-    if (!okClass || !okSection) {
+    if (!studentMatchesHomework(homework, classIds, sectionIds)) {
       return res.status(403).json({
         success: false,
         message: "This homework is not for your class/section",
@@ -1266,9 +1299,7 @@ export const submitMobileHomework = async (req, res, next) => {
     }
 
     const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
-    const okClass = classIds.some((id) => String(id) === String(homework.classId));
-    const okSection = sectionIds.some((id) => String(id) === String(homework.sectionId));
-    if (!okClass || !okSection) {
+    if (!studentMatchesHomework(homework, classIds, sectionIds)) {
       return res.status(403).json({
         success: false,
         message: "This homework is not for your class/section",
@@ -1362,9 +1393,7 @@ export const askTeacherOnHomework = async (req, res, next) => {
     }
 
     const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
-    const okClass = classIds.some((id) => String(id) === String(homework.classId));
-    const okSection = sectionIds.some((id) => String(id) === String(homework.sectionId));
-    if (!okClass || !okSection) {
+    if (!studentMatchesHomework(homework, classIds, sectionIds)) {
       return res.status(403).json({
         success: false,
         message: "This homework is not for your class/section",

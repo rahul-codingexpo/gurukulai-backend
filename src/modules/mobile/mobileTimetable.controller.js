@@ -1,6 +1,9 @@
 import Timetable from "../timetable/timetable.model.js";
 import ClassTimetable from "../classTimetable/classTimetable.model.js";
-import { formatEntrySubjects } from "../classTimetable/classTimetable.utils.js";
+import {
+  formatEntrySubjects,
+  enrichTimetableTeacherFields,
+} from "../classTimetable/classTimetable.utils.js";
 import Student from "../student/student.model.js";
 import Staff from "../staff/staff.model.js";
 import ClassModel from "../academic/class.model.js";
@@ -268,6 +271,8 @@ export const getMobileTimetable = async (req, res, next) => {
       .lean();
 
     if (ttEntries?.length) {
+      // Staff-id teacher refs do not populate on User — resolve display names.
+      await enrichTimetableTeacherFields(ttEntries, { migrate: false });
       slots = ttEntries
         .filter((e) => !e.periodId?.isBreak)
         .map((e) => ({
@@ -299,6 +304,8 @@ export const getMobileTimetable = async (req, res, next) => {
         .populate("teacherId", "name")
         .sort({ startTime: 1 })
         .lean();
+
+      await enrichTimetableTeacherFields(ctEntries, { migrate: false });
 
       slots = ctEntries.map((e) => {
         const subjects = formatEntrySubjects(e);
@@ -440,6 +447,7 @@ export const getMobileTimetableCourses = async (req, res, next) => {
       .lean();
 
     if (ttEntries?.length) {
+      await enrichTimetableTeacherFields(ttEntries, { migrate: false });
       normalized = ttEntries
         .filter((e) => !e.periodId?.isBreak)
         .map((e) => ({
@@ -478,6 +486,8 @@ export const getMobileTimetableCourses = async (req, res, next) => {
         .populate("teacherId", "name")
         .sort({ day: 1, startTime: 1 })
         .lean();
+
+      await enrichTimetableTeacherFields(ctEntries, { migrate: false });
 
       normalized = ctEntries.map((e) => {
         const subjects = formatEntrySubjects(e);

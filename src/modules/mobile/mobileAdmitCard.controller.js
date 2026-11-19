@@ -15,6 +15,82 @@ const mapChildSummary = (student) => ({
   rollNumber: student.rollNumber || "",
 });
 
+const toDateOnly = (value) => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
+
+const formatDDMMYYYY = (value) => {
+  const x = toDateOnly(value);
+  if (!x) return "";
+  const dd = String(x.getUTCDate()).padStart(2, "0");
+  const mm = String(x.getUTCMonth() + 1).padStart(2, "0");
+  const yyyy = x.getUTCFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+};
+
+const parseTimeToMinutes = (value) => {
+  const s = String(value || "").trim();
+  const m24 = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    return parseInt(m24[1], 10) * 60 + parseInt(m24[2], 10);
+  }
+  const m12 = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (m12) {
+    let h = parseInt(m12[1], 10);
+    const min = parseInt(m12[2], 10);
+    const ap = m12[3].toUpperCase();
+    if (ap === "PM" && h !== 12) h += 12;
+    if (ap === "AM" && h === 12) h = 0;
+    return h * 60 + min;
+  }
+  return Number.MAX_SAFE_INTEGER;
+};
+
+/** Map exam.schedule → mobile admit-card rows (subject / date / time). */
+const mapAdmitSchedule = (schedule = []) =>
+  (schedule || [])
+    .map((row) => {
+      const sub = row.subjectId;
+      const subjectName = (sub?.name || "").trim();
+      const paper = String(row.paperType || "Theory").trim() || "Theory";
+      const label =
+        subjectName && paper && paper !== "Theory"
+          ? `${subjectName} (${paper})`
+          : subjectName || "Subject";
+      const start = String(row.startTime || "").trim();
+      const end = String(row.endTime || "").trim();
+      const timeRange =
+        start && end ? `${start} - ${end}` : start || end || "";
+      return {
+        subjectId: String(sub?._id ?? sub ?? ""),
+        subject_name: label,
+        subjectName: label,
+        subject: label,
+        paper_type: paper,
+        date: formatDDMMYYYY(row.examDate),
+        examDate: row.examDate,
+        start_time: start,
+        end_time: end,
+        startTime: start,
+        endTime: end,
+        time_range: timeRange,
+        time: timeRange,
+      };
+    })
+    .filter((row) => row.date || row.time_range)
+    .sort((a, b) => {
+      const ta = toDateOnly(a.examDate)?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+      const tb = toDateOnly(b.examDate)?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+      if (ta !== tb) return ta - tb;
+      const timeCmp =
+        parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time);
+      if (timeCmp !== 0) return timeCmp;
+      return String(a.paper_type || "").localeCompare(String(b.paper_type || ""));
+    });
+
 /**
  * Resolve the student record for admit-card.
  * Student → own linked profile only (ignores client studentId).
@@ -95,6 +171,12 @@ const splitInstructions = (raw) => {
     .filter(Boolean);
 };
 
+const populateAdmitExam = (query) =>
+  query
+    .populate("classId", "name")
+    .populate("sectionId", "name")
+    .populate("schedule.subjectId", "name code type");
+
 /** GET /api/mobile/admit-card/children — Parent linked children (Student → self) */
 export const listMobileAdmitCardChildren = async (req, res, next) => {
   try {
@@ -153,10 +235,7 @@ export const getMobileAdmitCard = async (req, res, next) => {
     let exam = null;
 
     if (req.query.examId) {
-      exam = await Exam.findById(req.query.examId)
-        .populate("classId", "name")
-        .populate("sectionId", "name")
-        .lean();
+      exam = await populateAdmitExam(Exam.findById(req.query.examId)).lean();
 
       if (!exam) {
         return res.status(404).json({
@@ -190,9 +269,7 @@ export const getMobileAdmitCard = async (req, res, next) => {
         ];
       }
 
-      exam = await Exam.findOne(filter)
-        .populate("classId", "name")
-        .populate("sectionId", "name")
+      exam = await populateAdmitExam(Exam.findOne(filter))
         .sort({ createdAt: -1 })
         .lean();
 
@@ -221,6 +298,7 @@ export const getMobileAdmitCard = async (req, res, next) => {
       : className;
 
     const instructions = splitInstructions(exam.instructions);
+    const schedule = mapAdmitSchedule(exam.schedule);
 
     res.json({
       success: true,
@@ -243,6 +321,9 @@ export const getMobileAdmitCard = async (req, res, next) => {
         instructions,
         instruction: instructions.join("\n"),
         examId: String(exam._id),
+        schedule,
+        timetable: schedule,
+        examSchedule: schedule,
       },
     });
   } catch (error) {

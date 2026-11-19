@@ -115,7 +115,6 @@ const computePeriodStatus = (schedule, now = new Date()) => {
 const buildMobileListItem = (examLean, now = new Date()) => {
   const period = computePeriodStatus(examLean.schedule, now);
   const syllabus = (examLean.syllabusUrl || "").trim();
-  const instr = (examLean.instructions || "").trim();
   return {
     id: examLean._id,
     title: examLean.name,
@@ -132,7 +131,8 @@ const buildMobileListItem = (examLean, now = new Date()) => {
     sectionId: examLean.sectionId?._id ?? examLean.sectionId ?? null,
     sectionName: examLean.sectionId?.name ?? null,
     syllabusUrl: syllabus || null,
-    hasSyllabus: Boolean(syllabus || instr),
+    // File/URL only — do not treat exam hall instructions as syllabus
+    hasSyllabus: Boolean(syllabus),
   };
 };
 
@@ -339,7 +339,6 @@ export const getMobileExamById = async (req, res, next) => {
     const period = computePeriodStatus(exam.schedule, now);
     const marksMap = marksBySubjectId(exam.subjects);
     const syllabus = (exam.syllabusUrl || "").trim();
-    const instr = (exam.instructions || "").trim();
 
     const scheduleRows = (exam.schedule || []).flatMap((row) => {
       const sid = String(row.subjectId?._id ?? row.subjectId);
@@ -395,7 +394,7 @@ export const getMobileExamById = async (req, res, next) => {
       sectionName: exam.sectionId?.name ?? null,
       instructions: exam.instructions || "",
       syllabusUrl: syllabus || null,
-      hasSyllabus: Boolean(syllabus || instr),
+      hasSyllabus: Boolean(syllabus),
       subjects: (exam.subjects || []).map((s) => ({
         subjectId: String(s.subjectId?._id ?? s.subjectId),
         subject_name: s.subjectId?.name || "",

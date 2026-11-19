@@ -932,14 +932,98 @@ export const mobileGetExamMarks = async (req, res, next) => {
       return res.status(403).json({ success: false, message: "Not allowed" });
     }
 
-    if (role === "Student" || role === "Parent") {
-      const key = role === "Student" ? "studentLogin.userId" : "parentLogin.userId";
-      const student = await Student.findOne({ [key]: req.user._id }).select("_id");
-      if (!student) return res.status(404).json({ success: false, message: "Student profile not found" });
-      req.query.studentId = String(student._id);
+    // Teachers/Staff keep the raw nested map for marks entry UIs.
+    if (role === "Teacher" || role === "Staff") {
+      return getExamMarks(req, res, next);
     }
 
-    return getExamMarks(req, res, next);
+    const key = role === "Student" ? "studentLogin.userId" : "parentLogin.userId";
+    const student = await Student.findOne({ [key]: req.user._id }).select(
+      "_id schoolId",
+    );
+    if (!student) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Student profile not found" });
+    }
+
+    const schoolId =
+      resolveSchoolId(req) || student.schoolId?._id || student.schoolId;
+    const exam = await Exam.findOne({ _id: req.params.examId, schoolId })
+      .populate("subjects.subjectId", "name code type")
+      .lean();
+    if (!exam) {
+      return res.status(404).json({ success: false, message: "Exam not found" });
+    }
+
+    const subjectNames = {};
+    for (const s of exam.subjects || []) {
+      const sid = String(s.subjectId?._id ?? s.subjectId ?? "");
+      const name = String(s.subjectId?.name || "").trim();
+      if (sid && name) subjectNames[sid] = name;
+    }
+
+    const marks = await ExamMark.find({
+      schoolId,
+      examId: exam._id,
+      studentId: student._id,
+    })
+      .select("subjectId paperType value practicalValue")
+      .lean();
+
+    const bySubject = {};
+    for (const m of marks) {
+      const sub = String(m.subjectId);
+      const paperType = normalizePaperType(m.paperType);
+      if (!bySubject[sub]) bySubject[sub] = {};
+      const cell = bySubject[sub];
+      cell[paperType] = m.value;
+      if (paperType === "Theory") {
+        cell.value = m.value;
+        cell.theory = m.value;
+        cell.Theory = m.value;
+      } else if (paperType === "Practical") {
+        cell.practical = m.value;
+        cell.practicalValue = m.value;
+        cell.Practical = m.value;
+      }
+      if (m.practicalValue != null && String(m.practicalValue).trim() !== "") {
+        cell.practical = m.practicalValue;
+        cell.practicalValue = m.practicalValue;
+        if (cell.Practical == null || cell.Practical === "") {
+          cell.Practical = m.practicalValue;
+        }
+      }
+    }
+
+    const subjects = Object.entries(bySubject).map(([subjectId, cell]) => {
+      const name = subjectNames[subjectId] || "Subject";
+      return {
+        subjectId,
+        subject_name: name,
+        subjectName: name,
+        name,
+        theory: cell.theory ?? cell.Theory ?? cell.value ?? null,
+        Theory: cell.Theory ?? cell.theory ?? cell.value ?? null,
+        practical: cell.practical ?? cell.Practical ?? cell.practicalValue ?? null,
+        Practical: cell.Practical ?? cell.practical ?? cell.practicalValue ?? null,
+        value: cell.value ?? cell.theory ?? cell.Theory ?? null,
+        ...cell,
+      };
+    });
+
+    // Prefer named list for mobile result UIs. Keep nested map for older clients,
+    // but apps must display subject_name — never raw subjectId/code.
+    return res.json({
+      success: true,
+      data: {
+        studentId: String(student._id),
+        subjects,
+        subjectMarks: subjects,
+        marks: subjects,
+        [String(student._id)]: bySubject,
+      },
+    });
   } catch (error) {
     next(error);
   }
