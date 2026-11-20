@@ -80,6 +80,11 @@ import {
   listMobileClasses,
   listMobileSections,
 } from "./mobileClasses.controller.js";
+import {
+  listMobileClassDiary,
+  createMobileClassDiary,
+  deleteMobileClassDiary,
+} from "./mobileClassDiary.controller.js";
 import { getMobileGuardian } from "./mobileGuardian.controller.js";
 import { listMobileTeachers } from "./mobileTeachers.controller.js";
 import {
@@ -126,6 +131,20 @@ router.get("/guardian", protect, mobileOnly, getMobileGuardian);
 
 // Classes list (mobile — replaces web GET /classes for app)
 router.get("/classes", protect, mobileOnly, listMobileClasses);
+
+// Class diary (teacher posts topic + photos; student/parent view)
+router.get("/class-diary", protect, mobileOnly, listMobileClassDiary);
+router.post(
+  "/class-diary",
+  protect,
+  mobileOnly,
+  uploadStudyMaterials.fields([
+    { name: "topicPhoto", maxCount: 1 },
+    { name: "classworkPhoto", maxCount: 1 },
+  ]),
+  createMobileClassDiary,
+);
+router.delete("/class-diary/:id", protect, mobileOnly, deleteMobileClassDiary);
 
 // Sections list (mobile — replaces web GET /sections for app)
 router.get("/sections", protect, mobileOnly, listMobileSections);
