@@ -63,8 +63,9 @@ const serializeEntry = (doc) => {
     topic: plain.topic || "",
     topicPhoto: normalizePhotoPath(plain.topicPhoto),
     classworkPhoto: normalizePhotoPath(plain.classworkPhoto),
-    createdBy: plain.createdBy?._id ?? plain.createdBy ?? null,
+    createdBy: String(plain.createdBy?._id ?? plain.createdBy ?? ""),
     teacherName: plain.createdBy?.name || "",
+    authorName: plain.createdBy?.name || "",
     createdAt: plain.createdAt || null,
     updatedAt: plain.updatedAt || null,
   };
@@ -159,14 +160,14 @@ export const listMobileClassDiary = async (req, res, next) => {
   }
 };
 
-/** POST /api/mobile/class-diary — Teacher only */
+/** POST /api/mobile/class-diary — Teacher / Student / Parent */
 export const createMobileClassDiary = async (req, res, next) => {
   try {
     const role = roleNameOf(req);
-    if (role !== "Teacher") {
+    if (!["Teacher", "Student", "Parent"].includes(role)) {
       return res.status(403).json({
         success: false,
-        message: "Only teachers can add class diary entries",
+        message: "Not allowed to add class diary entries",
       });
     }
 
@@ -179,10 +180,35 @@ export const createMobileClassDiary = async (req, res, next) => {
     }
 
     const body = req.body || {};
-    const classId = String(body.classId || "").trim();
-    const sectionId = String(body.sectionId || "").trim() || null;
+    let classId = String(body.classId || "").trim();
+    let sectionId = String(body.sectionId || "").trim() || null;
     const topic = String(body.topic || "").trim();
     const dateRaw = String(body.date || "").trim();
+
+    if (role === "Student" || role === "Parent") {
+      const student = await resolveStudentSelf(req);
+      if (!student) {
+        return res.status(404).json({
+          success: false,
+          message: "Student profile not found",
+        });
+      }
+      const { classIds, sectionIds } = await resolveStudentClassSectionIds(student);
+      if (!classIds.length) {
+        return res.status(400).json({
+          success: false,
+          message: "No class linked to this student",
+        });
+      }
+      if (classId && !classIds.some((id) => String(id) === classId)) {
+        return res.status(403).json({
+          success: false,
+          message: "Not allowed to post for this class",
+        });
+      }
+      if (!classId) classId = String(classIds[0]);
+      if (!sectionId && sectionIds.length) sectionId = String(sectionIds[0]);
+    }
 
     if (!classId || !topic) {
       return res.status(400).json({
@@ -227,14 +253,14 @@ export const createMobileClassDiary = async (req, res, next) => {
   }
 };
 
-/** DELETE /api/mobile/class-diary/:id — Teacher, own entries */
+/** DELETE /api/mobile/class-diary/:id — own entries (Teacher / Student / Parent) */
 export const deleteMobileClassDiary = async (req, res, next) => {
   try {
     const role = roleNameOf(req);
-    if (role !== "Teacher") {
+    if (!["Teacher", "Student", "Parent"].includes(role)) {
       return res.status(403).json({
         success: false,
-        message: "Only teachers can delete class diary entries",
+        message: "Not allowed to delete class diary entries",
       });
     }
 
