@@ -92,9 +92,10 @@ export const getMyWallet = async (req, res, next) => {
 /**
  * POST /api/wallet/payments/upload
  * multipart/form-data:
- * - utrId (text) required
  * - amount (number) required
  * - paymentScreenshot (file) required
+ * - reason (text) optional — why payment was made (mobile)
+ * - utrId (text) optional — auto-generated if omitted when reason is present
  */
 export const uploadWalletPayment = async (req, res, next) => {
   try {
@@ -108,15 +109,23 @@ export const uploadWalletPayment = async (req, res, next) => {
 
     const schoolId = student.schoolId;
 
-    const { utrId, amount } = req.body || {};
-    const utr = String(utrId || "").trim();
+    const { utrId, amount, reason } = req.body || {};
+    const why = String(reason || "").trim();
+    let utr = String(utrId || "").trim();
     const amt = parseNumber(amount);
 
     if (!utr) {
-      return res.status(400).json({ success: false, message: "utrId is required" });
+      // Mobile proof flow sends reason without bank UTR; keep uniqueness for schema.
+      utr = `APP-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     }
     if (!amt || amt <= 0) {
       return res.status(400).json({ success: false, message: "amount must be > 0" });
+    }
+    if (!why && !String(utrId || "").trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "reason or utrId is required",
+      });
     }
 
     if (!req.file) {
@@ -135,6 +144,7 @@ export const uploadWalletPayment = async (req, res, next) => {
       studentId: student._id,
       utrId: utr,
       amount: amt,
+      reason: why,
       qrCode: qrCodeSnapshot,
       paymentScreenshot: uploadedFileUrl(req.file),
       status: "PENDING",

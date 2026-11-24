@@ -59,6 +59,8 @@ const serializeEntry = (doc) => {
     className: plain.classId?.name || "",
     sectionId: plain.sectionId?._id ?? plain.sectionId ?? null,
     sectionName: plain.sectionId?.name || "",
+    subjectId: plain.subjectId?._id ?? plain.subjectId ?? null,
+    subjectName: plain.subjectName || plain.subjectId?.name || "",
     date: plain.date,
     topic: plain.topic || "",
     topicPhoto: normalizePhotoPath(plain.topicPhoto),
@@ -97,6 +99,8 @@ export const listMobileClassDiary = async (req, res, next) => {
     const filter = { schoolId };
     const classId = String(req.query.classId || "").trim();
     const sectionId = String(req.query.sectionId || "").trim();
+    const subjectId = String(req.query.subjectId || "").trim();
+    const subjectName = String(req.query.subjectName || "").trim();
     const dateRaw = String(req.query.date || "").trim();
 
     if (role === "Student" || role === "Parent") {
@@ -119,13 +123,15 @@ export const listMobileClassDiary = async (req, res, next) => {
           { sectionId: { $in: sectionIds } },
         ];
       }
-      if (classId && !classIds.some((id) => String(id) === classId)) {
+      const askedClassId =
+        classId && classId !== "mine" ? classId : "";
+      if (askedClassId && !classIds.some((id) => String(id) === askedClassId)) {
         return res.status(403).json({
           success: false,
           message: "Not allowed to view this class diary",
         });
       }
-      if (classId) filter.classId = classId;
+      if (askedClassId) filter.classId = askedClassId;
     } else {
       if (classId) filter.classId = classId;
       if (sectionId) {
@@ -144,9 +150,16 @@ export const listMobileClassDiary = async (req, res, next) => {
       }
     }
 
+    if (subjectId) {
+      filter.subjectId = subjectId;
+    } else if (subjectName) {
+      filter.subjectName = new RegExp(`^${subjectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
+    }
+
     const rows = await ClassDiary.find(filter)
       .populate("classId", "name")
       .populate("sectionId", "name")
+      .populate("subjectId", "name")
       .populate("createdBy", "name")
       .sort({ date: -1, createdAt: -1 })
       .lean();
@@ -181,7 +194,10 @@ export const createMobileClassDiary = async (req, res, next) => {
 
     const body = req.body || {};
     let classId = String(body.classId || "").trim();
+    if (classId === "mine") classId = "";
     let sectionId = String(body.sectionId || "").trim() || null;
+    const subjectId = String(body.subjectId || "").trim() || null;
+    const subjectName = String(body.subjectName || "").trim();
     const topic = String(body.topic || "").trim();
     const dateRaw = String(body.date || "").trim();
 
@@ -232,6 +248,8 @@ export const createMobileClassDiary = async (req, res, next) => {
       schoolId,
       classId,
       sectionId,
+      subjectId,
+      subjectName,
       date: startOfDay(date),
       topic,
       topicPhoto,
@@ -242,6 +260,7 @@ export const createMobileClassDiary = async (req, res, next) => {
     const populated = await ClassDiary.findById(entry._id)
       .populate("classId", "name")
       .populate("sectionId", "name")
+      .populate("subjectId", "name")
       .populate("createdBy", "name");
 
     res.status(201).json({

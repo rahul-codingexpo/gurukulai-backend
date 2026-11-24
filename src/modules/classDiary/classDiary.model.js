@@ -20,6 +20,18 @@ const classDiarySchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    subjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Subject",
+      default: null,
+      index: true,
+    },
+    subjectName: {
+      type: String,
+      trim: true,
+      default: "",
+      index: true,
+    },
     date: {
       type: Date,
       required: true,

@@ -28,6 +28,13 @@ const walletPaymentSchema = new mongoose.Schema(
       min: 0.01,
     },
 
+    // Free-text reason from mobile app ("why payment was made")
+    reason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     qrCode: {
       type: String,
       trim: true,
