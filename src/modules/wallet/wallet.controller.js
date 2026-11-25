@@ -36,6 +36,58 @@ const parseNumber = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * Resolve UPI + QR for a student school.
+ * If the campus school has no QR, fall back to another school in the same
+ * branch (admin often saves payment setup on one campus only).
+ */
+const resolveSchoolPaymentSetup = async (primarySchoolId, userSchoolId) => {
+  const ids = [];
+  const pushId = (id) => {
+    const s = id?._id ?? id;
+    if (!s) return;
+    const key = String(s);
+    if (!ids.some((x) => String(x) === key)) ids.push(s);
+  };
+  pushId(primarySchoolId);
+  pushId(userSchoolId);
+
+  let upiId = "";
+  let qrCode = "";
+  let branchId = null;
+
+  for (const id of ids) {
+    const school = await School.findById(id).select("upiId qrCode branchId").lean();
+    if (!school) continue;
+    if (!branchId && school.branchId) branchId = school.branchId;
+    if (!upiId && school.upiId) upiId = String(school.upiId).trim();
+    if (!qrCode && school.qrCode) qrCode = String(school.qrCode).trim();
+    if (upiId && qrCode) {
+      return { upiId, qrCode };
+    }
+  }
+
+  if (branchId && (!upiId || !qrCode)) {
+    const siblings = await School.find({
+      branchId,
+      $or: [
+        { qrCode: { $exists: true, $nin: [null, ""] } },
+        { upiId: { $exists: true, $nin: [null, ""] } },
+      ],
+    })
+      .select("upiId qrCode")
+      .lean();
+
+    for (const school of siblings) {
+      if (!upiId && school.upiId) upiId = String(school.upiId).trim();
+      if (!qrCode && school.qrCode) qrCode = String(school.qrCode).trim();
+      if (upiId && qrCode) break;
+    }
+  }
+
+  return { upiId, qrCode };
+};
+
 /** GET /api/wallet/me */
 export const getMyWallet = async (req, res, next) => {
   try {
@@ -70,15 +122,22 @@ export const getMyWallet = async (req, res, next) => {
 
     const walletBalance = credit - dueRemaining; // positive = credit, negative = owing
 
-    const school = await School.findById(schoolId).select("upiId qrCode");
+    const userSchoolId = req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
+    const { upiId, qrCode } = await resolveSchoolPaymentSetup(
+      schoolId,
+      userSchoolId
+    );
 
     res.json({
       success: true,
       data: {
         schoolId,
         studentId: student._id,
-        upiId: school?.upiId ?? "",
-        qrCode: school?.qrCode ?? "",
+        upiId,
+        qrCode,
+        // Aliases used by admin "School Payment Setup" / older clients
+        paymentUpiId: upiId,
+        paymentQr: qrCode,
         credit,
         dueRemaining,
         walletBalance,

@@ -1,7 +1,10 @@
 import WalletPayment from "../wallet/walletPayment.model.js";
 import Wallet from "../wallet/wallet.model.js";
 import FeeInvoice from "./feeInvoice.model.js";
-import { schoolIdMatchValue } from "../../utils/branchScope.util.js";
+import {
+  resolveBranchSchoolIds,
+  schoolIdMatchValue,
+} from "../../utils/branchScope.util.js";
 
 const ensureSchoolId = (req, res) => {
   if (!req.schoolId) {
@@ -24,8 +27,16 @@ export const listWalletPayments = async (req, res, next) => {
     if (!schoolId) return;
 
     const { status = "PENDING", studentId, page = 1, limit = 20 } = req.query;
-    const filter = { schoolId };
-    if (status) filter.status = status;
+    // Show proofs across all campuses in the branch (admin may select one campus
+    // while students upload under another campus schoolId).
+    const branchIds = await resolveBranchSchoolIds(req.schoolId);
+    const filter = {
+      schoolId: branchIds.length ? { $in: branchIds } : schoolId,
+    };
+    const statusFilter = String(status || "").trim().toUpperCase();
+    if (statusFilter && statusFilter !== "ALL") {
+      filter.status = statusFilter;
+    }
     if (studentId) filter.studentId = studentId;
 
     const pageNo = Math.max(1, parseInt(page, 10) || 1);

@@ -192,9 +192,11 @@ export const updateSchool = async (req, res, next) => {
     }
     delete update.paymentQr;
 
-    // If user provided qrCode as a string in body, allow it
-    if (req.body?.qrCode) {
-      update.qrCode = String(req.body.qrCode).trim();
+    // String body qrCode only when non-empty and no new file was uploaded.
+    // Avoids multipart clients wiping a fresh file with a stale/empty text field.
+    const bodyQr = String(req.body?.qrCode || "").trim();
+    if (!qrFile && bodyQr) {
+      update.qrCode = bodyQr;
     }
 
     // Timetable template settings (Option D — Hybrid).
@@ -360,6 +362,20 @@ export const updateSchool = async (req, res, next) => {
     }
     if (qrFile && schoolDoc.qrCode && schoolDoc.qrCode !== update.qrCode) {
       await deleteFromSpacesByUrl(schoolDoc.qrCode);
+    }
+
+    // Keep UPI/QR in sync across campuses in the same branch so mobile
+    // students on any campus see the School Payment Setup image.
+    if (school?.branchId && (update.upiId !== undefined || update.qrCode !== undefined)) {
+      const siblingSet = {};
+      if (update.upiId !== undefined) siblingSet.upiId = update.upiId;
+      if (update.qrCode !== undefined) siblingSet.qrCode = update.qrCode;
+      if (Object.keys(siblingSet).length) {
+        await School.updateMany(
+          { branchId: school.branchId, _id: { $ne: school._id } },
+          { $set: siblingSet },
+        );
+      }
     }
 
     res.json({
