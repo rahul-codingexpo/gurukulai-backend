@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import StaffAttendance from "./staffAttendance.model.js";
 import Staff from "../staff/staff.model.js";
 import School from "../school/school.model.js";
@@ -5,12 +6,43 @@ import {
   buildStaffAttendancePayload,
   resolveStaffMarkTypeFromEntry,
   resolveAttendanceSettings,
+  parseHhmmToMinutes,
 } from "./staffAttendancePolicy.js";
+import { parseDateOnlyLocal } from "../../utils/dateOnly.util.js";
+
+const EXIT_MIN_GAP_MINUTES = 5;
 
 const hhmmNow = () => {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
+
+const minutesBetweenHhmm = (fromHhmm, toHhmm) => {
+  const from = parseHhmmToMinutes(fromHhmm);
+  const to = parseHhmmToMinutes(toHhmm);
+  if (from == null || to == null) return null;
+  let diff = to - from;
+  // Cross-midnight: treat as next-day exit
+  if (diff < 0) diff += 24 * 60;
+  return diff;
+};
+
+const staffScanResponse = ({ action, alreadyMarked, message, staff, attendance }) => ({
+  success: true,
+  action,
+  alreadyMarked: Boolean(alreadyMarked),
+  message,
+  data: {
+    staff: {
+      _id: staff._id,
+      name: staff.name,
+      designation: staff.designation,
+      phone: staff.phone || "",
+      email: staff.email || "",
+    },
+    attendance,
+  },
+});
 
 const resolveSchoolId = (req) => {
   const roleName = req.user?.roleId?.name;
@@ -327,6 +359,223 @@ export const deleteStaffAttendance = async (req, res, next) => {
       success: true,
       message: "Staff attendance record deleted",
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Mark staff Present/Late from ID-card QR (or phone fallback).
+ * Body: { qrPayload, date? } — QR format STF:{staffId} or STF:{staffId}:{phone}
+ */
+export const scanStaffAttendance = async (req, res, next) => {
+  try {
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          req.user?.roleId?.name === "SuperAdmin"
+            ? "schoolId is required (query or body)"
+            : "School context missing",
+      });
+    }
+
+    const raw = String(req.body?.qrPayload || "").trim();
+    if (!raw) {
+      return res.status(400).json({
+        success: false,
+        message: "qrPayload is required",
+      });
+    }
+
+    const dateInput =
+      req.body?.date ||
+      (() => {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      })();
+    const dateOnly = parseDateOnlyLocal(dateInput);
+    if (!dateOnly) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date",
+      });
+    }
+
+    const staffSelect = "_id name designation phone email status";
+    let staff = null;
+    const stfMatch = raw.match(/^STF:([a-fA-F0-9]{24})(?::(.*))?$/i);
+    if (stfMatch) {
+      const staffId = stfMatch[1];
+      const phoneFromQr = String(stfMatch[2] || "").trim();
+      if (!mongoose.Types.ObjectId.isValid(staffId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid staff QR code",
+        });
+      }
+      staff = await Staff.findOne({ _id: staffId, schoolId })
+        .select(staffSelect)
+        .lean();
+      if (!staff) {
+        return res.status(404).json({
+          success: false,
+          message: "Staff not found for this school",
+        });
+      }
+      const phoneDb = String(staff.phone || "").trim();
+      if (
+        phoneFromQr &&
+        phoneDb &&
+        phoneFromQr.replace(/\s+/g, "") !== phoneDb.replace(/\s+/g, "")
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "QR phone does not match staff record",
+        });
+      }
+    } else {
+      const digits = raw.replace(/\D/g, "");
+      const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const phoneRe = new RegExp(`^${escaped}$`, "i");
+      staff = await Staff.findOne({
+        schoolId,
+        $or: [
+          { phone: phoneRe },
+          ...(digits.length >= 8 ? [{ phone: new RegExp(`${digits}$`) }] : []),
+          { email: phoneRe },
+        ],
+      })
+        .select(staffSelect)
+        .lean();
+      if (!staff) {
+        return res.status(404).json({
+          success: false,
+          message: "No staff found for this code",
+        });
+      }
+    }
+
+    if (String(staff.status || "").toUpperCase() === "INACTIVE") {
+      return res.status(400).json({
+        success: false,
+        message: "Staff is inactive",
+      });
+    }
+
+    const nowHhmm = hhmmNow();
+    const existing = await StaffAttendance.findOne({
+      schoolId,
+      date: dateOnly,
+      staffId: staff._id,
+    }).lean();
+
+    const hasPresentEntry =
+      Boolean(existing) &&
+      (existing.status === "Present" ||
+        existing.markType === "Present" ||
+        existing.markType === "Late") &&
+      Boolean(String(existing.entryTime || "").trim());
+    const existingExit = String(existing?.exitTime || "").trim();
+
+    // Second (or later) scan: mark / update exit after minimum gap from entry
+    if (hasPresentEntry) {
+      const gapMinutes = minutesBetweenHhmm(existing.entryTime, nowHhmm);
+      const staffPopulate = "name designation phone";
+
+      if (!existingExit) {
+        if (gapMinutes == null || gapMinutes < EXIT_MIN_GAP_MINUTES) {
+          const waitMins =
+            gapMinutes == null
+              ? EXIT_MIN_GAP_MINUTES
+              : Math.max(1, EXIT_MIN_GAP_MINUTES - gapMinutes);
+          const record = await StaffAttendance.findById(existing._id).populate(
+            "staffId",
+            staffPopulate,
+          );
+          return res.status(200).json(
+            staffScanResponse({
+              action: "too_soon",
+              alreadyMarked: true,
+              message: `Entry already marked at ${existing.entryTime}. Wait ${waitMins} more minute(s) to mark exit.`,
+              staff,
+              attendance: record,
+            }),
+          );
+        }
+
+        const record = await StaffAttendance.findOneAndUpdate(
+          { _id: existing._id },
+          { exitTime: nowHhmm },
+          { new: true },
+        ).populate("staffId", staffPopulate);
+
+        return res.status(200).json(
+          staffScanResponse({
+            action: "exit",
+            alreadyMarked: true,
+            message: `Exit marked at ${nowHhmm}`,
+            staff,
+            attendance: record,
+          }),
+        );
+      }
+
+      const record = await StaffAttendance.findOneAndUpdate(
+        { _id: existing._id },
+        { exitTime: nowHhmm },
+        { new: true },
+      ).populate("staffId", staffPopulate);
+
+      return res.status(200).json(
+        staffScanResponse({
+          action: "exit_update",
+          alreadyMarked: true,
+          message: `Exit updated to ${nowHhmm}`,
+          staff,
+          attendance: record,
+        }),
+      );
+    }
+
+    // First scan of the day: mark entry
+    const school = await School.findById(schoolId).select("attendanceSettings").lean();
+    const attendanceSettings = resolveAttendanceSettings(school);
+    const payload = buildStaffAttendancePayload({
+      status: "Present",
+      markType: "Present",
+      entryTime: nowHhmm,
+      exitTime: "",
+      attendanceSettings,
+      nowHhmm,
+    });
+
+    const record = await StaffAttendance.findOneAndUpdate(
+      { schoolId, date: dateOnly, staffId: staff._id },
+      {
+        schoolId,
+        date: dateOnly,
+        staffId: staff._id,
+        ...payload,
+      },
+      { upsert: true, new: true },
+    ).populate("staffId", "name designation phone");
+
+    const markLabel = record.markType || record.status || "Present";
+
+    return res.status(200).json(
+      staffScanResponse({
+        action: "entry",
+        alreadyMarked: false,
+        message: `Attendance marked ${markLabel} (entry ${record.entryTime || nowHhmm})`,
+        staff,
+        attendance: record,
+      }),
+    );
   } catch (error) {
     next(error);
   }

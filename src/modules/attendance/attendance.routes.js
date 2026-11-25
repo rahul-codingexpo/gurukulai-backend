@@ -1,12 +1,14 @@
 import express from "express";
 import {
   markStudentAttendance,
+  scanStudentAttendance,
   getStudentAttendanceByDate,
   updateStudentAttendance,
   deleteStudentAttendance,
 } from "./studentAttendance.controller.js";
 import {
   markStaffAttendance,
+  scanStaffAttendance,
   getStaffAttendanceByDate,
   updateStaffAttendance,
   deleteStaffAttendance,
@@ -24,6 +26,15 @@ router.post(
   protect,
   authorize("Admin", "Principal", "Teacher"),
   markStudentAttendance,
+);
+
+// Mark Present from ID-card QR / admission number
+router.post(
+  "/students/scan",
+  protect,
+  authorize("Admin", "Principal", "Teacher", "SuperAdmin"),
+  injectSchool,
+  scanStudentAttendance,
 );
 
 // Get attendance – Admin, Principal, Teacher, SuperAdmin (filters/roster), Student (own only)
@@ -58,6 +69,15 @@ router.post(
   protect,
   authorize("Admin", "Principal"),
   markStaffAttendance,
+);
+
+// Mark Present/Late from staff ID-card QR / phone
+router.post(
+  "/staff/scan",
+  protect,
+  authorize("Admin", "Principal", "SuperAdmin"),
+  injectSchool,
+  scanStaffAttendance,
 );
 
 // Get attendance – Admin, Principal (all/ filters), Staff, Teacher, Principal (own only)

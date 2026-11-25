@@ -66,6 +66,7 @@ export const listFeeAuditLogs = async (req, res, next) => {
       filter.$or = [
         { "studentRef.studentName": rx },
         { "studentRef.admissionNumber": rx },
+        { "studentRef.fatherName": rx },
         { summary: rx },
       ];
     }

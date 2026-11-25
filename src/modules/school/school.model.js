@@ -203,10 +203,12 @@ const schoolSchema = new mongoose.Schema(
       ],
     },
 
-    // Staff attendance policy: start time + grace → Present / Late.
+    // Attendance policy: start time + grace → Present / Late (staff & student).
     attendanceSettings: {
       staffStartTime: { type: String, default: "08:00", trim: true }, // HH:mm
       staffGraceMinutes: { type: Number, default: 5, min: 0, max: 180 },
+      studentStartTime: { type: String, default: "08:00", trim: true }, // HH:mm
+      studentGraceMinutes: { type: Number, default: 5, min: 0, max: 180 },
     },
 
     // Per-school timetable view template (Option D — Hybrid).

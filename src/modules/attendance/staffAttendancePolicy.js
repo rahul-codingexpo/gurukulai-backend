@@ -29,7 +29,29 @@ export function resolveAttendanceSettings(schoolOrSettings) {
     staffGraceMinutes = 5;
   }
   staffGraceMinutes = Math.min(180, Math.round(staffGraceMinutes));
-  return { staffStartTime, staffGraceMinutes };
+
+  const studentStartTime = normalizeHhmm(raw.studentStartTime, "08:00");
+  let studentGraceMinutes = Number(raw.studentGraceMinutes);
+  if (!Number.isFinite(studentGraceMinutes) || studentGraceMinutes < 0) {
+    studentGraceMinutes = 5;
+  }
+  studentGraceMinutes = Math.min(180, Math.round(studentGraceMinutes));
+
+  return {
+    staffStartTime,
+    staffGraceMinutes,
+    studentStartTime,
+    studentGraceMinutes,
+  };
+}
+
+/** Alias focused on student fields (same source as resolveAttendanceSettings). */
+export function resolveStudentAttendanceSettings(schoolOrSettings) {
+  const resolved = resolveAttendanceSettings(schoolOrSettings);
+  return {
+    studentStartTime: resolved.studentStartTime,
+    studentGraceMinutes: resolved.studentGraceMinutes,
+  };
 }
 
 /**
@@ -57,6 +79,33 @@ export function resolveStaffMarkTypeFromEntry({
 
   const startMins = parseHhmmToMinutes(staffStartTime) ?? 8 * 60;
   const lateFrom = startMins + staffGraceMinutes;
+  return entryMins >= lateFrom ? "Late" : "Present";
+}
+
+/**
+ * Present if entry is before (student start + grace).
+ * Same rule as staff, using studentStartTime / studentGraceMinutes.
+ */
+export function resolveStudentMarkTypeFromEntry({
+  entryTime,
+  status,
+  markType,
+  attendanceSettings,
+}) {
+  const selected = String(markType || status || "").trim();
+  if (selected === "Absent" || String(status || "").trim() === "Absent") {
+    return "Absent";
+  }
+
+  const { studentStartTime, studentGraceMinutes } =
+    resolveStudentAttendanceSettings(attendanceSettings);
+  const entryMins = parseHhmmToMinutes(entryTime);
+  if (entryMins == null) {
+    return selected === "Late" ? "Late" : "Present";
+  }
+
+  const startMins = parseHhmmToMinutes(studentStartTime) ?? 8 * 60;
+  const lateFrom = startMins + studentGraceMinutes;
   return entryMins >= lateFrom ? "Late" : "Present";
 }
 

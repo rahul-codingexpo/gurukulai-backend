@@ -50,6 +50,8 @@ const feeAuditLogSchema = new Schema(
       studentId: { type: Schema.Types.ObjectId, ref: "Student" },
       studentName: { type: String, default: "" },
       admissionNumber: { type: String, default: "" },
+      /** Set for By-father (family) invoice audits so history is searchable by father. */
+      fatherName: { type: String, default: "" },
     },
 
     performedBy: {

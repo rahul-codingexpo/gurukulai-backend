@@ -51,7 +51,9 @@ const monthDateRange = (year, month) => {
 
 /**
  * Payable = monthly salary − (absent days × daily salary).
- * Daily salary = monthly salary / 30. Unmarked days are not treated as absent.
+ * Daily salary = monthly salary / 30.
+ * Unmarked past days in the month count as Absent (same as Staff Attendance UI).
+ * Late marks count as Present for pay.
  */
 const calculateAttendancePay = (monthlySalary, presentDays, absentDays) => {
   const monthly = roundMoney(monthlySalary);
@@ -71,27 +73,75 @@ const calculateAttendancePay = (monthlySalary, presentDays, absentDays) => {
   };
 };
 
+const pad2 = (n) => String(n).padStart(2, "0");
+
+/** Local calendar YYYY-MM-DD for a Date (avoids UTC day shift). */
+const toLocalYmd = (dateVal) => {
+  const d = dateVal instanceof Date ? dateVal : new Date(dateVal);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+
+/**
+ * Count Present / Absent for each staff in a month.
+ * Iterates every past calendar day through min(monthEnd, today):
+ * - Present / Late record → present
+ * - Explicit Absent → absent
+ * - No record → absent (matches Staff Attendance synthetic fill)
+ */
 const attendanceCountsForMonth = async (schoolId, staffIds, month, year) => {
   const counts = new Map();
   staffIds.forEach((id) => {
     counts.set(String(id), { presentDays: 0, absentDays: 0 });
   });
   if (!staffIds.length) return counts;
+
   const { start, end } = monthDateRange(year, month);
   const records = await StaffAttendance.find({
     schoolId,
     staffId: { $in: staffIds },
     date: { $gte: start, $lt: end },
   })
-    .select("staffId status")
+    .select("staffId status markType date")
     .lean();
+
+  /** staffId → Map(ymd → isAbsent) */
+  const byStaffDate = new Map();
   records.forEach((row) => {
-    const key = String(row.staffId);
-    if (!counts.has(key)) counts.set(key, { presentDays: 0, absentDays: 0 });
-    const bucket = counts.get(key);
-    if (row.status === "Absent") bucket.absentDays += 1;
-    else bucket.presentDays += 1;
+    const staffKey = String(row.staffId);
+    const ymd = toLocalYmd(row.date);
+    if (!ymd) return;
+    if (!byStaffDate.has(staffKey)) byStaffDate.set(staffKey, new Map());
+    const mark = String(row.markType || "").trim();
+    const status = String(row.status || "").trim();
+    const isAbsent = mark === "Absent" || status === "Absent";
+    byStaffDate.get(staffKey).set(ymd, isAbsent);
   });
+
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  const lastDayOfMonth = new Date(year, month, 0).getDate();
+
+  staffIds.forEach((id) => {
+    const staffKey = String(id);
+    const dayMap = byStaffDate.get(staffKey) || new Map();
+    const bucket = counts.get(staffKey) || { presentDays: 0, absentDays: 0 };
+
+    for (let day = 1; day <= lastDayOfMonth; day += 1) {
+      const d = new Date(year, month - 1, day);
+      if (d > today) continue;
+      const ymd = `${year}-${pad2(month)}-${pad2(day)}`;
+      if (dayMap.has(ymd)) {
+        if (dayMap.get(ymd)) bucket.absentDays += 1;
+        else bucket.presentDays += 1;
+      } else {
+        bucket.absentDays += 1;
+      }
+    }
+
+    counts.set(staffKey, bucket);
+  });
+
   return counts;
 };
 

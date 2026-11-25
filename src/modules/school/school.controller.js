@@ -306,7 +306,7 @@ export const updateSchool = async (req, res, next) => {
       };
     }
 
-    // Staff attendance time / grace settings
+    // Staff / student attendance time / grace settings
     let parsedAttendanceSettings = null;
     if (update.attendanceSettings && typeof update.attendanceSettings === "string") {
       try {
@@ -349,6 +349,27 @@ export const updateSchool = async (req, res, next) => {
           });
         }
         next.staffGraceMinutes = Math.round(g);
+      }
+      if (next.studentStartTime != null) {
+        const raw = String(next.studentStartTime).trim();
+        if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(raw)) {
+          return res.status(400).json({
+            success: false,
+            message: "studentStartTime must be HH:mm (e.g. 08:00)",
+          });
+        }
+        const [hh, mm] = raw.split(":");
+        next.studentStartTime = `${String(hh).padStart(2, "0")}:${mm}`;
+      }
+      if (next.studentGraceMinutes != null) {
+        const g = Number(next.studentGraceMinutes);
+        if (!Number.isFinite(g) || g < 0 || g > 180) {
+          return res.status(400).json({
+            success: false,
+            message: "studentGraceMinutes must be between 0 and 180",
+          });
+        }
+        next.studentGraceMinutes = Math.round(g);
       }
       update.attendanceSettings = next;
     }

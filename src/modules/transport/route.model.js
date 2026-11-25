@@ -32,7 +32,11 @@ const transportRouteSchema = new Schema(
     routeName: { type: String, required: true, trim: true },
     routeDescription: { type: String, default: "", trim: true },
     startPoint: { type: String, default: "", trim: true },
+    startPickupTime: { type: String, default: "", trim: true },
+    startDropTime: { type: String, default: "", trim: true },
     endPoint: { type: String, default: "", trim: true },
+    endPickupTime: { type: String, default: "", trim: true },
+    endDropTime: { type: String, default: "", trim: true },
     stops: { type: [routeStopSchema], default: [] },
     status: {
       type: String,

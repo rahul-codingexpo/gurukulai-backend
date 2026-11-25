@@ -1,7 +1,10 @@
 import Payment from "./payment.model.js";
 import FeeInvoice from "./feeInvoice.model.js";
-import { queueFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
+import { notifyFeeInvoiceWhatsApp } from "../../services/whatsapp/index.js";
 import { schoolIdFilter } from "../../utils/branchScope.util.js";
+import { writeFeeAudit, diffTrackedFields } from "./feeAudit/feeAudit.service.js";
+
+const PAYMENT_AUDIT_FIELDS = ["paid", "status", "paidDate", "amount"];
 
 const requireSchool = (req, res) => {
   if (!req.schoolId) {
@@ -77,6 +80,10 @@ export const recordPayment = async (req, res, next) => {
       });
     }
     const date = paymentDate ? new Date(paymentDate) : new Date();
+    const beforePaid = Number(invoice.paid) || 0;
+    const beforeStatus = invoice.status;
+    const beforePaidDate = invoice.paidDate || null;
+
     const payment = await Payment.create({
       schoolId: invoice.schoolId,
       invoiceId,
@@ -101,11 +108,35 @@ export const recordPayment = async (req, res, next) => {
     }
     await invoice.save();
     const invPopulated = await FeeInvoice.findById(invoice._id)
-      .populate("studentId", "name className section rollNumber")
-      .populate("feeTypeId", "name code");
+      .populate(
+        "studentId",
+        "name admissionNumber className section rollNumber phone parents",
+      )
+      .populate("feeTypeId", "name code amount period")
+      .lean();
+
+    const beforeSnap = {
+      ...(invPopulated || {}),
+      paid: beforePaid,
+      status: beforeStatus,
+      paidDate: beforePaidDate,
+    };
+    const changes = diffTrackedFields(beforeSnap, invPopulated || {}, PAYMENT_AUDIT_FIELDS);
+    if (changes.length) {
+      await writeFeeAudit({
+        schoolId: invoice.schoolId,
+        sourceType: "FeeInvoice",
+        sourceId: invoice._id,
+        action: "updated",
+        before: beforeSnap,
+        after: invPopulated,
+        changes,
+        user: req.user,
+      });
+    }
 
     // Re-send invoice template on payment updates so family gets Partial/Paid status.
-    queueFeeInvoiceWhatsApp(invoice._id);
+    notifyFeeInvoiceWhatsApp(invoice._id);
 
     res.status(201).json({
       success: true,

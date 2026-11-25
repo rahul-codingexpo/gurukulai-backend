@@ -476,7 +476,11 @@ export const createRoute = async (req, res, next) => {
       routeName,
       routeDescription: String(body.routeDescription || "").trim(),
       startPoint: String(body.startPoint || "").trim(),
+      startPickupTime: String(body.startPickupTime || "").trim(),
+      startDropTime: String(body.startDropTime || "").trim(),
       endPoint: String(body.endPoint || "").trim(),
+      endPickupTime: String(body.endPickupTime || "").trim(),
+      endDropTime: String(body.endDropTime || "").trim(),
       stops,
       status: normalizeStatus(body.status),
       remarks: String(body.remarks || "").trim(),
@@ -496,7 +500,17 @@ export const updateRoute = async (req, res, next) => {
     const route = await TransportRoute.findOne({ _id: req.params.id, schoolId, ...notDeleted });
     if (!route) return fail(res, 404, "Route not found");
     const body = req.body || {};
-    ["routeName", "routeDescription", "startPoint", "endPoint", "remarks"].forEach((f) => {
+    [
+      "routeName",
+      "routeDescription",
+      "startPoint",
+      "startPickupTime",
+      "startDropTime",
+      "endPoint",
+      "endPickupTime",
+      "endDropTime",
+      "remarks",
+    ].forEach((f) => {
       if (body[f] !== undefined) route[f] = String(body[f]).trim();
     });
     if (body.status !== undefined) route.status = normalizeStatus(body.status);

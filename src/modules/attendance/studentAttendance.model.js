@@ -27,11 +27,18 @@ const studentAttendanceSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Optional display status for mobile teacher marking flow
+    // Optional display status for mobile teacher marking flow / QR scan
     markType: {
       type: String,
       enum: ["Present", "Absent", "Late"],
       default: undefined,
+    },
+
+    // Scan / mark time HH:mm — used with school student attendance settings
+    entryTime: {
+      type: String,
+      trim: true,
+      default: "",
     },
 
     markedBy: {

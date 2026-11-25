@@ -1,15 +1,26 @@
+import mongoose from "mongoose";
 import StudentAttendance from "./studentAttendance.model.js";
 import Student from "../student/student.model.js";
 import Section from "../academic/section.model.js";
+import School from "../school/school.model.js";
 import {
   parseDateOnlyLocal,
   dateOnlyRange,
   attendanceStudentIdKey,
 } from "../../utils/dateOnly.util.js";
+import {
+  resolveStudentAttendanceSettings,
+  resolveStudentMarkTypeFromEntry,
+} from "./staffAttendancePolicy.js";
 
 const MANAGER_ROLES = ["Admin", "Principal", "SuperAdmin", "Teacher"];
 
 const toDateOnly = (input) => parseDateOnlyLocal(input);
+
+const hhmmNow = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
 
 const displayAttendanceStatus = (record) => {
   if (!record) return null;
@@ -466,6 +477,179 @@ export const deleteStudentAttendance = async (req, res, next) => {
     res.json({
       success: true,
       message: "Student attendance record deleted",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Mark Present from ID-card QR (or admission number fallback).
+ * Body: { qrPayload, date? } — QR format STU:{studentId}:{admissionNo}
+ */
+export const scanStudentAttendance = async (req, res, next) => {
+  try {
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          req.user?.roleId?.name === "SuperAdmin"
+            ? "schoolId is required (query or body)"
+            : "School context missing",
+      });
+    }
+
+    const raw = String(req.body?.qrPayload || "").trim();
+    if (!raw) {
+      return res.status(400).json({
+        success: false,
+        message: "qrPayload is required",
+      });
+    }
+
+    const dateInput =
+      req.body?.date ||
+      (() => {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      })();
+    const dateOnly = toDateOnly(dateInput);
+    if (!dateOnly) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date",
+      });
+    }
+
+    const studentSelect =
+      "_id name rollNumber className section admissionNumber admissionNo";
+    let student = null;
+    const stuMatch = raw.match(/^STU:([a-fA-F0-9]{24})(?::(.*))?$/i);
+    if (stuMatch) {
+      const studentId = stuMatch[1];
+      const admissionFromQr = String(stuMatch[2] || "").trim();
+      if (!mongoose.Types.ObjectId.isValid(studentId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid student QR code",
+        });
+      }
+      student = await Student.findOne({ _id: studentId, schoolId })
+        .select(studentSelect)
+        .lean();
+      if (!student) {
+        return res.status(404).json({
+          success: false,
+          message: "Student not found for this school",
+        });
+      }
+      const admissionDb = String(
+        student.admissionNumber || student.admissionNo || "",
+      ).trim();
+      if (
+        admissionFromQr &&
+        admissionDb &&
+        admissionFromQr.toLowerCase() !== admissionDb.toLowerCase()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "QR admission number does not match student record",
+        });
+      }
+    } else {
+      const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const admissionRe = new RegExp(`^${escaped}$`, "i");
+      student = await Student.findOne({
+        schoolId,
+        admissionNumber: admissionRe,
+      })
+        .select(studentSelect)
+        .lean();
+      if (!student) {
+        return res.status(404).json({
+          success: false,
+          message: "No student found for this code",
+        });
+      }
+    }
+
+    const existing = await StudentAttendance.findOne({
+      schoolId,
+      date: dateOnly,
+      studentId: student._id,
+    }).lean();
+
+    const alreadyMarked =
+      Boolean(existing) &&
+      (existing.status === "Present" ||
+        existing.markType === "Present" ||
+        existing.markType === "Late");
+
+    if (alreadyMarked) {
+      const existingMark =
+        displayAttendanceStatus(existing) || existing.status || "Present";
+      return res.status(200).json({
+        success: true,
+        alreadyMarked: true,
+        message: `Attendance already marked ${existingMark} for today`,
+        data: {
+          student: {
+            _id: student._id,
+            name: student.name,
+            admissionNumber: student.admissionNumber || student.admissionNo || "",
+            className: student.className,
+            section: student.section,
+            rollNumber: student.rollNumber,
+          },
+          attendance: existing,
+        },
+      });
+    }
+
+    const school = await School.findById(schoolId).select("attendanceSettings").lean();
+    const attendanceSettings = resolveStudentAttendanceSettings(school);
+    const entryTime = hhmmNow();
+    const markType = resolveStudentMarkTypeFromEntry({
+      entryTime,
+      status: "Present",
+      attendanceSettings,
+    });
+
+    const record = await StudentAttendance.findOneAndUpdate(
+      { schoolId, date: dateOnly, studentId: student._id },
+      {
+        schoolId,
+        date: dateOnly,
+        studentId: student._id,
+        status: "Present",
+        markType,
+        entryTime,
+        markedBy: req.user._id,
+      },
+      { upsert: true, new: true },
+    )
+      .populate("studentId", "name rollNumber className section admissionNumber")
+      .populate("markedBy", "name");
+
+    return res.status(200).json({
+      success: true,
+      alreadyMarked: false,
+      message: `Attendance marked ${markType} (entry ${entryTime})`,
+      data: {
+        student: {
+          _id: student._id,
+          name: student.name,
+          admissionNumber: student.admissionNumber || student.admissionNo || "",
+          className: student.className,
+          section: student.section,
+          rollNumber: student.rollNumber,
+        },
+        attendance: record,
+      },
     });
   } catch (error) {
     next(error);

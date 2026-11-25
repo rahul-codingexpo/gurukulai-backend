@@ -20,37 +20,102 @@ export const diffTrackedFields = (before = {}, after = {}, tracked = []) => {
 
 const toPlain = (doc) => {
   if (!doc) return null;
-  if (typeof doc.toObject === "function") return doc.toObject();
-  return JSON.parse(JSON.stringify(doc));
+  try {
+    if (typeof doc.toObject === "function") {
+      const obj = doc.toObject({ depopulate: false });
+      return JSON.parse(JSON.stringify(obj));
+    }
+    return JSON.parse(JSON.stringify(doc));
+  } catch {
+    if (typeof doc.toObject === "function") return doc.toObject();
+    return doc;
+  }
 };
 
-const buildSummary = ({ action, sourceType, changes }) => {
-  if (action === "created") return `${sourceType} created`;
-  if (action === "deleted") return `${sourceType} deleted (soft)`;
-  if (action === "restored") return `${sourceType} restored`;
+const isFamilyInvoiceDoc = (doc) => {
+  if (!doc) return false;
+  if (doc.isFamilyInvoice === true) return true;
+  const remarks = String(doc.remarks || "").trim();
+  return /\[FAMILY\]/i.test(remarks) || /\bFamily\s*:/i.test(remarks);
+};
+
+const fatherNameFromDoc = (doc) => {
+  if (!doc) return "";
+  const student = doc.studentId;
+  if (student && typeof student === "object") {
+    const name = String(student?.parents?.father?.name || "").trim();
+    if (name) return name;
+  }
+  const fromRemarks = String(doc.remarks || "").match(
+    /(?:\[FAMILY\]\s*)?Family\s*:\s*([^·\n|]+)/i,
+  );
+  return fromRemarks ? String(fromRemarks[1] || "").trim() : "";
+};
+
+const familySuffix = (doc) => {
+  if (!isFamilyInvoiceDoc(doc)) return "";
+  const fatherName = fatherNameFromDoc(doc);
+  return fatherName ? ` — Family (${fatherName})` : " — Family";
+};
+
+const formatMoneyInr = (n) => {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return "—";
+  return `₹${num.toLocaleString("en-IN")}`;
+};
+
+const buildSummary = ({ action, sourceType, changes, snapshot }) => {
+  const suffix = familySuffix(snapshot);
+  if (action === "created") {
+    const amount = snapshot?.amount;
+    const paid = snapshot?.paid;
+    const moneyBits = [];
+    if (amount != null && amount !== "") moneyBits.push(`amount ${formatMoneyInr(amount)}`);
+    if (paid != null && Number(paid) > 0) moneyBits.push(`paid ${formatMoneyInr(paid)}`);
+    const money = moneyBits.length ? ` (${moneyBits.join(", ")})` : "";
+    return `${sourceType} created${money}${suffix}`;
+  }
+  if (action === "deleted") return `${sourceType} deleted (soft)${suffix}`;
+  if (action === "restored") return `${sourceType} restored${suffix}`;
   if (action === "updated") {
-    if (!changes?.length) return `${sourceType} updated`;
+    const paidChange = (changes || []).find((c) => c.field === "paid");
+    if (paidChange) {
+      const delta = Number(paidChange.newValue) - Number(paidChange.oldValue);
+      const paidPart = Number.isFinite(delta) && delta > 0
+        ? `payment +${formatMoneyInr(delta)} (paid ${formatMoneyInr(paidChange.oldValue)} → ${formatMoneyInr(paidChange.newValue)})`
+        : `paid ${formatMoneyInr(paidChange.oldValue)} → ${formatMoneyInr(paidChange.newValue)}`;
+      const otherFields = (changes || [])
+        .filter((c) => c.field !== "paid")
+        .map((c) => c.field)
+        .slice(0, 3);
+      const extras = otherFields.length ? `; ${otherFields.join(", ")}` : "";
+      return `${sourceType} ${paidPart}${extras}${suffix}`;
+    }
+    if (!changes?.length) return `${sourceType} updated${suffix}`;
     const fields = changes.map((c) => c.field).slice(0, 4).join(", ");
     const more = changes.length > 4 ? ` +${changes.length - 4} more` : "";
-    return `${sourceType} updated: ${fields}${more}`;
+    return `${sourceType} updated: ${fields}${more}${suffix}`;
   }
-  return `${sourceType} ${action}`;
+  return `${sourceType} ${action}${suffix}`;
 };
 
 const studentRefFromDoc = (doc) => {
   if (!doc) return undefined;
   const student = doc.studentId;
+  const fatherName = fatherNameFromDoc(doc);
   if (student && typeof student === "object") {
     return {
       studentId: student._id || student.id,
       studentName: student.name || doc.studentName || "",
       admissionNumber: student.admissionNumber || doc.admissionNumber || "",
+      fatherName,
     };
   }
   return {
     studentId: typeof student === "string" || student instanceof Object ? student : undefined,
     studentName: doc.studentName || "",
     admissionNumber: doc.admissionNumber || "",
+    fatherName,
   };
 };
 
@@ -71,7 +136,7 @@ export const writeFeeAudit = async ({
   try {
     const snapshot = toPlain(after) || toPlain(before) || null;
     const studentRef = studentRefFromDoc(snapshot);
-    const summary = buildSummary({ action, sourceType, changes });
+    const summary = buildSummary({ action, sourceType, changes, snapshot });
 
     return await FeeAuditLog.create({
       schoolId,
