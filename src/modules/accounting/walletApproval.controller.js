@@ -79,9 +79,10 @@ export const approveWalletPayment = async (req, res, next) => {
     const schoolId = ensureSchoolId(req, res);
     if (!schoolId) return;
 
+    const branchIds = await resolveBranchSchoolIds(req.schoolId);
     const payment = await WalletPayment.findOne({
       _id: req.params.id,
-      schoolId,
+      schoolId: branchIds.length ? { $in: branchIds } : schoolId,
     });
     if (!payment) {
       return res.status(404).json({ success: false, message: "Payment not found" });
@@ -156,9 +157,10 @@ export const rejectWalletPayment = async (req, res, next) => {
 
     const { reason = "" } = req.body || {};
 
+    const branchIds = await resolveBranchSchoolIds(req.schoolId);
     const payment = await WalletPayment.findOne({
       _id: req.params.id,
-      schoolId,
+      schoolId: branchIds.length ? { $in: branchIds } : schoolId,
     });
     if (!payment) {
       return res.status(404).json({ success: false, message: "Payment not found" });

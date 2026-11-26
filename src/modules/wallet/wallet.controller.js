@@ -41,6 +41,7 @@ const parseNumber = (v) => {
  * Resolve UPI + QR for a student school.
  * Falls back across branch campuses and same-name schools (admin often
  * saves QR on a different campus document than the student's schoolId).
+ * Returns paymentSchoolId = school that owns the QR/UPI (for proof uploads).
  */
 const resolveSchoolPaymentSetup = async (primarySchoolId, userSchoolId) => {
   const seedIds = [];
@@ -63,17 +64,25 @@ const resolveSchoolPaymentSetup = async (primarySchoolId, userSchoolId) => {
 
   let upiId = "";
   let qrCode = "";
+  let paymentSchoolId = primarySchoolId?._id ?? primarySchoolId ?? null;
   const schools = await School.find({ _id: { $in: related } })
     .select("upiId qrCode")
     .lean();
 
-  for (const school of schools) {
-    if (!upiId && school.upiId) upiId = String(school.upiId).trim();
-    if (!qrCode && school.qrCode) qrCode = String(school.qrCode).trim();
-    if (upiId && qrCode) break;
+  // Prefer the campus that actually has the standee/QR image saved.
+  const withQr = schools.find((s) => String(s.qrCode || "").trim());
+  const withUpi = schools.find((s) => String(s.upiId || "").trim());
+  if (withQr) {
+    paymentSchoolId = withQr._id;
+    qrCode = String(withQr.qrCode).trim();
+    if (withQr.upiId) upiId = String(withQr.upiId).trim();
+  }
+  if (!upiId && withUpi) {
+    if (!paymentSchoolId) paymentSchoolId = withUpi._id;
+    upiId = String(withUpi.upiId).trim();
   }
 
-  return { upiId, qrCode };
+  return { upiId, qrCode, paymentSchoolId };
 };
 
 /** GET /api/wallet/me */
@@ -111,7 +120,7 @@ export const getMyWallet = async (req, res, next) => {
     const walletBalance = credit - dueRemaining; // positive = credit, negative = owing
 
     const userSchoolId = req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
-    const { upiId, qrCode } = await resolveSchoolPaymentSetup(
+    const { upiId, qrCode, paymentSchoolId } = await resolveSchoolPaymentSetup(
       schoolId,
       userSchoolId
     );
@@ -120,6 +129,7 @@ export const getMyWallet = async (req, res, next) => {
       success: true,
       data: {
         schoolId,
+        paymentSchoolId: paymentSchoolId || schoolId,
         studentId: student._id,
         upiId,
         qrCode,
@@ -154,7 +164,16 @@ export const uploadWalletPayment = async (req, res, next) => {
       });
     }
 
-    const schoolId = student.schoolId;
+    const studentSchoolId = student.schoolId;
+    const userSchoolId = req.user?.schoolId?._id ?? req.user?.schoolId ?? null;
+    const setup = await resolveSchoolPaymentSetup(
+      studentSchoolId,
+      userSchoolId
+    );
+    // Store under the campus that owns School Payment Setup so Fee Invoices
+    // admin list (scoped to that school) sees the proof immediately.
+    const schoolId = setup.paymentSchoolId || studentSchoolId;
+    const qrCode = setup.qrCode || "";
 
     const { utrId, amount, reason } = req.body || {};
     const why = String(reason || "").trim();
@@ -182,17 +201,13 @@ export const uploadWalletPayment = async (req, res, next) => {
       });
     }
 
-    // Get current QR snapshot (so UI can show what was used).
-    const school = await School.findById(schoolId).select("upiId qrCode");
-    const qrCodeSnapshot = school?.qrCode ?? "";
-
     const payment = await WalletPayment.create({
       schoolId,
       studentId: student._id,
       utrId: utr,
       amount: amt,
       reason: why,
-      qrCode: qrCodeSnapshot,
+      qrCode,
       paymentScreenshot: uploadedFileUrl(req.file),
       status: "PENDING",
       appliedToInvoices: 0,
@@ -230,16 +245,17 @@ export const getMyWalletPayments = async (req, res, next) => {
       });
     }
 
-    const schoolId = student.schoolId;
+    // Proofs may be stored on the payment-setup campus (not student.schoolId).
+    const filter = { studentId: student._id };
     const { page = 1, limit = 20 } = req.query || {};
 
     const pageNo = Math.max(1, parseInt(page, 10) || 1);
     const limitNo = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     const skip = (pageNo - 1) * limitNo;
 
-    const total = await WalletPayment.countDocuments({ schoolId, studentId: student._id });
+    const total = await WalletPayment.countDocuments(filter);
 
-    const payments = await WalletPayment.find({ schoolId, studentId: student._id })
+    const payments = await WalletPayment.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNo)
