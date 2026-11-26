@@ -65,13 +65,42 @@ const resolveSchoolPaymentSetup = async (primarySchoolId, userSchoolId) => {
   let upiId = "";
   let qrCode = "";
   let paymentSchoolId = primarySchoolId?._id ?? primarySchoolId ?? null;
-  const schools = await School.find({ _id: { $in: related } })
-    .select("upiId qrCode")
+  let schools = await School.find({ _id: { $in: related } })
+    .select("upiId qrCode name")
     .lean();
 
   // Prefer the campus that actually has the standee/QR image saved.
-  const withQr = schools.find((s) => String(s.qrCode || "").trim());
-  const withUpi = schools.find((s) => String(s.upiId || "").trim());
+  let withQr = schools.find((s) => String(s.qrCode || "").trim());
+  let withUpi = schools.find((s) => String(s.upiId || "").trim());
+
+  // Last resort: any school whose name starts with the same 2 words and has a QR.
+  // Covers typos ("Schooh") / truncated campus names that miss exact branch links.
+  if (!withQr) {
+    const seedSchool = await School.findById(
+      primarySchoolId?._id ?? primarySchoolId ?? userSchoolId?._id ?? userSchoolId,
+    )
+      .select("name")
+      .lean();
+    const tokens = String(seedSchool?.name || "")
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 1);
+    const shortPrefix = tokens.slice(0, Math.min(2, tokens.length)).join(" ");
+    if (shortPrefix) {
+      const escaped = shortPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const fuzzy = await School.find({
+        name: new RegExp(`^${escaped}`, "i"),
+        qrCode: { $exists: true, $nin: [null, ""] },
+      })
+        .select("upiId qrCode name")
+        .lean();
+      if (fuzzy.length) {
+        withQr = fuzzy[0];
+        schools = [...schools, ...fuzzy];
+      }
+    }
+  }
+
   if (withQr) {
     paymentSchoolId = withQr._id;
     qrCode = String(withQr.qrCode).trim();
@@ -80,6 +109,37 @@ const resolveSchoolPaymentSetup = async (primarySchoolId, userSchoolId) => {
   if (!upiId && withUpi) {
     if (!paymentSchoolId) paymentSchoolId = withUpi._id;
     upiId = String(withUpi.upiId).trim();
+  }
+
+  // Self-heal: copy standee onto the student/user school so /schools + next reads work.
+  if (qrCode) {
+    const targets = [];
+    const pushTarget = (id) => {
+      const raw = id?._id ?? id;
+      if (!raw) return;
+      if (String(raw) === String(paymentSchoolId)) return;
+      if (!targets.some((x) => String(x) === String(raw))) targets.push(raw);
+    };
+    pushTarget(primarySchoolId);
+    pushTarget(userSchoolId);
+    if (targets.length) {
+      await School.updateMany(
+        {
+          _id: { $in: targets },
+          $or: [
+            { qrCode: { $exists: false } },
+            { qrCode: null },
+            { qrCode: "" },
+          ],
+        },
+        {
+          $set: {
+            qrCode,
+            ...(upiId ? { upiId } : {}),
+          },
+        },
+      );
+    }
   }
 
   return { upiId, qrCode, paymentSchoolId };

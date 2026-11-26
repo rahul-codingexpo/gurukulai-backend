@@ -80,7 +80,35 @@ export const getSchools = async (req, res, next) => {
       ? {}
       : { _id: homeId };
 
-    const schools = await School.find(filter).populate("branchId", "name status");
+    let schools = await School.find(filter).populate("branchId", "name status");
+
+    // Student/parent home school may lack qrCode while a related campus has it.
+    // Merge payment standee fields so the mobile app can display the image.
+    if (!isSuperAdmin && homeId && schools?.length) {
+      const relatedIds = await resolveBranchSchoolIds(homeId);
+      if (relatedIds.length > 1) {
+        const withQr = await School.findOne({
+          _id: { $in: relatedIds },
+          qrCode: { $exists: true, $nin: [null, ""] },
+        })
+          .select("upiId qrCode")
+          .lean();
+        if (withQr) {
+          schools = schools.map((doc) => {
+            const obj = doc.toObject ? doc.toObject() : { ...doc };
+            if (!String(obj.qrCode || "").trim()) {
+              obj.qrCode = withQr.qrCode;
+              obj.paymentQr = withQr.qrCode;
+            }
+            if (!String(obj.upiId || "").trim() && withQr.upiId) {
+              obj.upiId = withQr.upiId;
+              obj.paymentUpiId = withQr.upiId;
+            }
+            return obj;
+          });
+        }
+      }
+    }
 
     res.json({
       success: true,

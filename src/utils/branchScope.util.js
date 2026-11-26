@@ -36,21 +36,34 @@ export const resolveBranchSchoolIds = async (schoolId) => {
   const name = String(school.name || "").trim();
   if (name) {
     // Match "Angels Public School" and "Angels Public School Begusarai"
+    // Also first 2 tokens ("Angels Public") so typos/truncation still link campuses.
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const baseName = name
       .replace(/\s+(begusarai|campus|branch)\s*$/i, "")
       .trim();
     const baseEscaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const nameQuery =
-      baseName && baseName.toLowerCase() !== name.toLowerCase()
-        ? {
-            $or: [
-              { name: new RegExp(`^${escaped}$`, "i") },
-              { name: new RegExp(`^${baseEscaped}`, "i") },
-            ],
-          }
-        : { name: new RegExp(`^${escaped}`, "i") };
-    const sameName = await School.find(nameQuery).select("_id").lean();
+    const tokens = name.split(/\s+/).filter((w) => w.length > 1);
+    const shortPrefix = tokens.slice(0, Math.min(2, tokens.length)).join(" ");
+    const shortEscaped = shortPrefix
+      ? shortPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      : "";
+
+    const orClauses = [
+      { name: new RegExp(`^${escaped}$`, "i") },
+      { name: new RegExp(`^${escaped}`, "i") },
+    ];
+    if (baseEscaped && baseEscaped.toLowerCase() !== escaped.toLowerCase()) {
+      orClauses.push({ name: new RegExp(`^${baseEscaped}`, "i") });
+    }
+    if (
+      shortEscaped &&
+      shortEscaped.toLowerCase() !== escaped.toLowerCase() &&
+      shortEscaped.toLowerCase() !== baseEscaped.toLowerCase()
+    ) {
+      orClauses.push({ name: new RegExp(`^${shortEscaped}`, "i") });
+    }
+
+    const sameName = await School.find({ $or: orClauses }).select("_id").lean();
     sameName.forEach((s) => push(s._id));
   }
 
