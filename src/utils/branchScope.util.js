@@ -6,18 +6,55 @@ const BRANCH_ACCOUNTING_ROLES = new Set(["Admin", "Principal", "Accountant"]);
 /**
  * Resolve all campus school IDs that share a branch with the given school.
  * Standalone schools (no branchId) return only themselves.
+ * Also includes schools with the same name (common when campuses were
+ * created without a shared branchId — breaks QR + wallet proof matching).
  */
 export const resolveBranchSchoolIds = async (schoolId) => {
   if (!schoolId) return [];
 
   const id = schoolId._id || schoolId;
-  const school = await School.findById(id).select("branchId").lean();
+  const school = await School.findById(id).select("branchId name").lean();
   if (!school) return [id];
 
-  if (!school.branchId) return [school._id];
+  const out = [];
+  const push = (value) => {
+    const raw = value?._id || value;
+    if (!raw) return;
+    const key = String(raw);
+    if (!out.some((x) => String(x) === key)) out.push(raw);
+  };
 
-  const campuses = await School.find({ branchId: school.branchId }).select("_id").lean();
-  return campuses.map((s) => s._id);
+  push(school._id);
+
+  if (school.branchId) {
+    const campuses = await School.find({ branchId: school.branchId })
+      .select("_id")
+      .lean();
+    campuses.forEach((s) => push(s._id));
+  }
+
+  const name = String(school.name || "").trim();
+  if (name) {
+    // Match "Angels Public School" and "Angels Public School Begusarai"
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const baseName = name
+      .replace(/\s+(begusarai|campus|branch)\s*$/i, "")
+      .trim();
+    const baseEscaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const nameQuery =
+      baseName && baseName.toLowerCase() !== name.toLowerCase()
+        ? {
+            $or: [
+              { name: new RegExp(`^${escaped}$`, "i") },
+              { name: new RegExp(`^${baseEscaped}`, "i") },
+            ],
+          }
+        : { name: new RegExp(`^${escaped}`, "i") };
+    const sameName = await School.find(nameQuery).select("_id").lean();
+    sameName.forEach((s) => push(s._id));
+  }
+
+  return out.length ? out : [id];
 };
 
 export const isBranchAccountingRole = (roleName) =>

@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { uploadedFileUrl } from "../../utils/uploadFile.util.js";
 import { deleteFromSpacesByUrl } from "../../utils/spacesFile.util.js";
 import { sendSchoolWelcomeEmail } from "../../services/email.service.js";
+import { resolveBranchSchoolIds } from "../../utils/branchScope.util.js";
 
 /**
  * Create School
@@ -385,17 +386,22 @@ export const updateSchool = async (req, res, next) => {
       await deleteFromSpacesByUrl(schoolDoc.qrCode);
     }
 
-    // Keep UPI/QR in sync across campuses in the same branch so mobile
-    // students on any campus see the School Payment Setup image.
-    if (school?.branchId && (update.upiId !== undefined || update.qrCode !== undefined)) {
+    // Keep UPI/QR in sync across related campuses (branch + same name).
+    if (school && (update.upiId !== undefined || update.qrCode !== undefined)) {
       const siblingSet = {};
       if (update.upiId !== undefined) siblingSet.upiId = update.upiId;
       if (update.qrCode !== undefined) siblingSet.qrCode = update.qrCode;
       if (Object.keys(siblingSet).length) {
-        await School.updateMany(
-          { branchId: school.branchId, _id: { $ne: school._id } },
-          { $set: siblingSet },
+        const relatedIds = await resolveBranchSchoolIds(school._id);
+        const targets = relatedIds.filter(
+          (id) => String(id) !== String(school._id),
         );
+        if (targets.length) {
+          await School.updateMany(
+            { _id: { $in: targets } },
+            { $set: siblingSet },
+          );
+        }
       }
     }
 

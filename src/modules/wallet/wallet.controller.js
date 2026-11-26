@@ -10,6 +10,7 @@ import {
   addStudentAdvance,
   useStudentAdvance,
 } from "./walletAdvance.util.js";
+import { resolveBranchSchoolIds } from "../../utils/branchScope.util.js";
 
 const resolveStudentForSelf = async (req) => {
   const roleName = req.user?.roleId?.name;
@@ -38,51 +39,38 @@ const parseNumber = (v) => {
 
 /**
  * Resolve UPI + QR for a student school.
- * If the campus school has no QR, fall back to another school in the same
- * branch (admin often saves payment setup on one campus only).
+ * Falls back across branch campuses and same-name schools (admin often
+ * saves QR on a different campus document than the student's schoolId).
  */
 const resolveSchoolPaymentSetup = async (primarySchoolId, userSchoolId) => {
-  const ids = [];
-  const pushId = (id) => {
+  const seedIds = [];
+  const pushSeed = (id) => {
     const s = id?._id ?? id;
     if (!s) return;
-    const key = String(s);
-    if (!ids.some((x) => String(x) === key)) ids.push(s);
+    if (!seedIds.some((x) => String(x) === String(s))) seedIds.push(s);
   };
-  pushId(primarySchoolId);
-  pushId(userSchoolId);
+  pushSeed(primarySchoolId);
+  pushSeed(userSchoolId);
+
+  const related = [];
+  for (const seed of seedIds) {
+    const ids = await resolveBranchSchoolIds(seed);
+    ids.forEach((id) => {
+      if (!related.some((x) => String(x) === String(id))) related.push(id);
+    });
+  }
+  if (!related.length) related.push(...seedIds);
 
   let upiId = "";
   let qrCode = "";
-  let branchId = null;
+  const schools = await School.find({ _id: { $in: related } })
+    .select("upiId qrCode")
+    .lean();
 
-  for (const id of ids) {
-    const school = await School.findById(id).select("upiId qrCode branchId").lean();
-    if (!school) continue;
-    if (!branchId && school.branchId) branchId = school.branchId;
+  for (const school of schools) {
     if (!upiId && school.upiId) upiId = String(school.upiId).trim();
     if (!qrCode && school.qrCode) qrCode = String(school.qrCode).trim();
-    if (upiId && qrCode) {
-      return { upiId, qrCode };
-    }
-  }
-
-  if (branchId && (!upiId || !qrCode)) {
-    const siblings = await School.find({
-      branchId,
-      $or: [
-        { qrCode: { $exists: true, $nin: [null, ""] } },
-        { upiId: { $exists: true, $nin: [null, ""] } },
-      ],
-    })
-      .select("upiId qrCode")
-      .lean();
-
-    for (const school of siblings) {
-      if (!upiId && school.upiId) upiId = String(school.upiId).trim();
-      if (!qrCode && school.qrCode) qrCode = String(school.qrCode).trim();
-      if (upiId && qrCode) break;
-    }
+    if (upiId && qrCode) break;
   }
 
   return { upiId, qrCode };
