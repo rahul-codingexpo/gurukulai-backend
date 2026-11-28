@@ -90,6 +90,7 @@ import { listMobileTeachers } from "./mobileTeachers.controller.js";
 import {
   getMobileFeeHistory,
   getMobileInvoices,
+  getMobileFeeStructure,
 } from "./mobileFees.controller.js";
 import {
   getMobileAdmitCard,
@@ -154,6 +155,7 @@ router.get("/teachers", protect, mobileOnly, listMobileTeachers);
 
 // Fees / invoices (Student / Parent)
 router.get("/fees/history", protect, mobileOnly, getMobileFeeHistory);
+router.get("/fees/structure", protect, mobileOnly, getMobileFeeStructure);
 router.get("/invoices", protect, mobileOnly, getMobileInvoices);
 
 // Admit card (Student / Parent) — dedicated route (not under /exams/:examId)
